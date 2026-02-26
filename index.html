@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>PDF Viewer &amp; Annotator</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+</head>
+<body>
+  <!-- Top Bar -->
+  <header id="toolbar">
+    <button id="btn-open" title="Open PDF">📂</button>
+    <button id="btn-prev" title="Previous page">◀</button>
+    <span id="page-info">0 / 0</span>
+    <button id="btn-next" title="Next page">▶</button>
+    <div class="separator"></div>
+    <button id="btn-zoom-out" title="Zoom out">➖</button>
+    <span id="zoom-level">100%</span>
+    <button id="btn-zoom-in" title="Zoom in">➕</button>
+    <div class="separator"></div>
+    <button id="btn-highlight" class="tool-btn" title="Highlight">🖍️</button>
+    <button id="btn-underline" class="tool-btn" title="Underline">U̲</button>
+    <button id="btn-draw" class="tool-btn" title="Free draw">✏️</button>
+    <button id="btn-text" class="tool-btn" title="Add text note">💬</button>
+    <button id="btn-eraser" class="tool-btn" title="Eraser">🧹</button>
+    <div class="separator"></div>
+    <input type="color" id="color-picker" value="#FFFF00" title="Annotation color" />
+    <button id="btn-undo" title="Undo">↩️</button>
+    <button id="btn-save" title="Save annotated PDF">💾</button>
+  </header>
+
+  <!-- Hidden file input -->
+  <input type="file" id="file-input" accept="application/pdf" hidden />
+
+  <!-- Main canvas area -->
+  <main id="viewer">
+    <div id="canvas-wrapper">
+      <canvas id="pdf-canvas"></canvas>
+      <canvas id="annotation-canvas"></canvas>
+    </div>
+    <div id="drop-zone">
+      <p>📄 Tap <strong>📂</strong> or drop a PDF here</p>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
