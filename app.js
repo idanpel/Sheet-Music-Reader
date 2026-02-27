@@ -367,7 +367,7 @@
 
   // ── Google Drive Integration (folder-restricted via Picker) ─────
   // Your OAuth Client ID from Google Cloud Console
-  const GDRIVE_CLIENT_ID = "339204074130-rhdbdqj454slskbvvqcaso546o9b4869.apps.googleusercontent.com";
+  const GDRIVE_CLIENT_ID = "339204074130-vucvvbpvlipuqak9f0h4m7b8876solrg.apps.googleusercontent.com";
   // API key for the Picker API (create at Google Cloud Console → Credentials → API Key)
   const GDRIVE_API_KEY = "AIzaSyAMwO5j93JgB3eZcFHVQ6br06eMoYSzr8I";
   // Restricted scope: only files explicitly opened/selected by the user
