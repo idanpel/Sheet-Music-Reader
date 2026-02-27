@@ -370,8 +370,8 @@
   const GDRIVE_CLIENT_ID = "339204074130-vucvvbpvlipuqak9f0h4m7b8876solrg.apps.googleusercontent.com";
   // API key for the Picker API (create at Google Cloud Console → Credentials → API Key)
   const GDRIVE_API_KEY = "AIzaSyAMwO5j93JgB3eZcFHVQ6br06eMoYSzr8I";
-  // Restricted scope: only files explicitly opened/selected by the user
-  const GDRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
+  // Restricted scope: read-only access (app only browses the folder you select)
+  const GDRIVE_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
 
   let gdriveToken = null;
