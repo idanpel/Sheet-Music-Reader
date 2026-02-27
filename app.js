@@ -53,6 +53,16 @@
   const SWIPE_TIME_LIMIT = 400;
   const TAP_ZONE_RATIO = 0.25;
 
+  // Pinch-zoom and pan state
+  let isPinching = false;
+  let pinchStartDist = 0;
+  let pinchStartScale = 1.5;
+  let panStartX = 0;
+  let panStartY = 0;
+  let isPanning = false;
+  let viewScrollX = 0; // preserved scroll position (ratio 0-1)
+  let viewScrollY = 0;
+
   // Page render cache
   const pageCache = {};
 
@@ -402,8 +412,9 @@
     if (pageNum <= 1 || isNavigating) return;
     isNavigating = true;
     storePageAnnotations();
+    saveScrollPosition();
     pageNum--;
-    renderPage(pageNum).then(() => { isNavigating = false; });
+    renderPage(pageNum).then(() => { restoreScrollPosition(); isNavigating = false; });
     updateButtons();
     schedulePersist();
   }
@@ -412,8 +423,9 @@
     if (pageNum >= totalPages || isNavigating) return;
     isNavigating = true;
     storePageAnnotations();
+    saveScrollPosition();
     pageNum++;
-    renderPage(pageNum).then(() => { isNavigating = false; });
+    renderPage(pageNum).then(() => { restoreScrollPosition(); isNavigating = false; });
     updateButtons();
     schedulePersist();
   }
@@ -423,21 +435,108 @@
     Object.keys(pageCache).forEach((k) => delete pageCache[k]);
   }
 
-  function zoomIn() {
+  function saveScrollPosition() {
+    const viewer = $("#viewer");
+    const maxX = Math.max(1, viewer.scrollWidth - viewer.clientWidth);
+    const maxY = Math.max(1, viewer.scrollHeight - viewer.clientHeight);
+    viewScrollX = viewer.scrollLeft / maxX;
+    viewScrollY = viewer.scrollTop / maxY;
+  }
+
+  function restoreScrollPosition() {
+    requestAnimationFrame(() => {
+      const viewer = $("#viewer");
+      const maxX = viewer.scrollWidth - viewer.clientWidth;
+      const maxY = viewer.scrollHeight - viewer.clientHeight;
+      viewer.scrollLeft = viewScrollX * maxX;
+      viewer.scrollTop = viewScrollY * maxY;
+    });
+  }
+
+  function applyZoom(newScale) {
     storePageAnnotations();
-    scale = Math.min(+(scale + 0.1).toFixed(2), 5);
+    saveScrollPosition();
+    scale = Math.max(0.3, Math.min(5, +(newScale).toFixed(2)));
     clearPageCache();
     zoomLabel.textContent = `${Math.round((scale / 1.5) * 100)}%`;
-    renderPage(pageNum);
+    renderPage(pageNum).then(() => restoreScrollPosition());
+  }
+
+  function zoomIn() {
+    applyZoom(scale + 0.1);
   }
 
   function zoomOut() {
-    storePageAnnotations();
-    scale = Math.max(+(scale - 0.1).toFixed(2), 0.3);
-    clearPageCache();
-    zoomLabel.textContent = `${Math.round((scale / 1.5) * 100)}%`;
-    renderPage(pageNum);
+    applyZoom(scale - 0.1);
   }
+
+  // ── Pinch-to-zoom ─────────────────────────────────────────────
+  function getTouchDist(e) {
+    const t = e.touches;
+    const dx = t[0].clientX - t[1].clientX;
+    const dy = t[0].clientY - t[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function getTouchCenter(e) {
+    const t = e.touches;
+    return {
+      x: (t[0].clientX + t[1].clientX) / 2,
+      y: (t[0].clientY + t[1].clientY) / 2,
+    };
+  }
+
+  // Attach pinch handlers to the viewer (not annCanvas) so they work while scrolling
+  const viewer = $("#viewer");
+
+  viewer.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2 && pdfDoc) {
+      isPinching = true;
+      drawing = false; // cancel any drawing
+      pinchStartDist = getTouchDist(e);
+      pinchStartScale = scale;
+      saveScrollPosition();
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  viewer.addEventListener("touchmove", (e) => {
+    if (isPinching && e.touches.length === 2) {
+      e.preventDefault();
+      const dist = getTouchDist(e);
+      const ratio = dist / pinchStartDist;
+      const newScale = Math.max(0.3, Math.min(5, pinchStartScale * ratio));
+      // Live preview via CSS transform for smooth feel
+      const cssRatio = newScale / scale;
+      wrapper.style.transformOrigin = "center center";
+      wrapper.style.transform = `scale(${cssRatio})`;
+      // Store the target scale for applying on end
+      wrapper._pendingScale = newScale;
+    }
+  }, { passive: false });
+
+  viewer.addEventListener("touchend", (e) => {
+    if (isPinching) {
+      isPinching = false;
+      const pending = wrapper._pendingScale;
+      wrapper.style.transform = "";
+      wrapper.style.transformOrigin = "";
+      delete wrapper._pendingScale;
+      if (pending && Math.abs(pending - scale) > 0.02) {
+        applyZoom(pending);
+      }
+    }
+  });
+
+  // Mouse wheel zoom (desktop)
+  viewer.addEventListener("wheel", (e) => {
+    if (!pdfDoc) return;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.15 : 0.15;
+      applyZoom(scale + delta);
+    }
+  }, { passive: false });
 
   // ── Tool selection ────────────────────────────────────────────
   function setTool(name) {
@@ -696,6 +795,9 @@
   function onPointerDown(e) {
     if (!pdfDoc) return;
 
+    // Ignore multi-touch (pinch-zoom handled separately)
+    if (e.touches && e.touches.length >= 2) return;
+
     // Track start position for navigation gestures
     const touch = e.touches ? e.touches[0] : e;
     navStartX = touch.clientX;
@@ -771,6 +873,9 @@
   }
 
   function onPointerMove(e) {
+    // Ignore multi-touch (pinch handled separately)
+    if (e.touches && e.touches.length >= 2) return;
+
     // Update eraser cursor position
     if (tool === "eraser") {
       const touch = e.touches ? e.touches[0] : e;

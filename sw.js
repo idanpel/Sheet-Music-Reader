@@ -1,4 +1,4 @@
-const CACHE_NAME = "scorepad-v2";
+const CACHE_NAME = "scorepad-v3";
 const ASSETS = [
   "./",
   "./index.html",
