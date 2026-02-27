@@ -300,3 +300,154 @@ html, body {
 }
 
 .gdrive-error { color: #e66; }
+
+/* ── Music symbol canvas ───────────────────────────────────── */
+#music-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+#annotation-canvas {
+  z-index: 3;
+}
+
+/* ── Music Symbol Picker Panel ─────────────────────────────── */
+#music-panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #1e1e1e;
+  border-top: 2px solid #444;
+  z-index: 50;
+  max-height: 55vh;
+  overflow-y: auto;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+  transition: transform 0.2s ease;
+}
+
+#music-panel.hidden {
+  display: none;
+}
+
+#music-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid #444;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+#music-panel-header button {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 1.4rem;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+#music-panel-header button:hover {
+  background: #333;
+  color: #fff;
+}
+
+#music-panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #333;
+  flex-wrap: wrap;
+}
+
+#music-panel-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #bbb;
+}
+
+#music-color {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+}
+
+#music-size {
+  width: 100px;
+}
+
+#music-size-label {
+  min-width: 22px;
+  text-align: center;
+}
+
+#music-symbol-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 10px 12px;
+}
+
+.music-sym-group {
+  width: 100%;
+  font-size: 0.7rem;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 4px 2px;
+}
+
+.music-sym-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: #2a2a2a;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  color: #eee;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+
+.music-sym-btn:hover {
+  background: #3a3a3a;
+}
+
+.music-sym-btn.selected {
+  background: #005a9e;
+  border-color: #3b9cff;
+}
+
+.music-sym-btn .sym-label {
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
+#music-selected {
+  padding: 8px 16px;
+  font-size: 0.8rem;
+  color: #888;
+  text-align: center;
+  border-top: 1px solid #333;
+}
+
+#btn-toggle-music.music-hidden {
+  opacity: 0.4;
+}

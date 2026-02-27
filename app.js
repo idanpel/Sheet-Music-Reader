@@ -10,8 +10,10 @@
   const fileInput   = $("#file-input");
   const pdfCanvas   = $("#pdf-canvas");
   const annCanvas   = $("#annotation-canvas");
+  const musicCanvas = $("#music-canvas");
   const pdfCtx      = pdfCanvas.getContext("2d");
   const annCtx      = annCanvas.getContext("2d");
+  const musicCtx    = musicCanvas.getContext("2d");
   const wrapper     = $("#canvas-wrapper");
   const dropZone    = $("#drop-zone");
   const pageInfo    = $("#page-info");
@@ -23,9 +25,15 @@
   let pageNum    = 1;
   let totalPages = 0;
   let scale      = 1.5;
-  let tool       = "none"; // highlight | underline | draw | text | eraser | none
+  let tool       = "none"; // highlight | underline | draw | text | eraser | music | none
   let drawing    = false;
   let currentPath = [];
+
+  // Music annotation state
+  let selectedMusicSymbol = null;  // current symbol to place
+  let musicAnnotations = {};       // { [pageNum]: [{symbol,px,py,color,fontSize}] }
+  let musicVisible = true;         // toggle music layer visibility
+  let musicUndoStacks = {};        // undo stacks for music symbols per page
 
   // Navigation gesture tracking (sheet music mode)
   let navStartX = 0;
@@ -99,9 +107,12 @@
     pdfCanvas.height = cached.height;
     annCanvas.width  = cached.width;
     annCanvas.height = cached.height;
+    musicCanvas.width  = cached.width;
+    musicCanvas.height = cached.height;
 
     pdfCtx.drawImage(cached, 0, 0);
     restorePageAnnotations();
+    renderMusicSymbols();
     pageInfo.textContent = `${num} / ${totalPages}`;
 
     // Pre-cache adjacent pages in background
@@ -116,6 +127,8 @@
     pageNum = 1;
     Object.keys(annotations).forEach((k) => delete annotations[k]);
     Object.keys(undoStacks).forEach((k) => delete undoStacks[k]);
+    Object.keys(musicAnnotations).forEach((k) => delete musicAnnotations[k]);
+    Object.keys(musicUndoStacks).forEach((k) => delete musicUndoStacks[k]);
 
     wrapper.style.display = "block";
     dropZone.classList.add("hidden");
@@ -174,11 +187,20 @@
         draw: "#btn-draw",
         text: "#btn-text",
         eraser: "#btn-eraser",
+        music: "#btn-music",
       };
       $(map[tool])?.classList.add("active");
     }
     annCanvas.style.cursor =
-      tool === "eraser" ? "cell" : tool === "none" ? "default" : "crosshair";
+      tool === "eraser" ? "cell" : tool === "music" ? "copy" : tool === "none" ? "default" : "crosshair";
+
+    // Show/hide music panel
+    const panel = $("#music-panel");
+    if (tool === "music") {
+      panel.classList.remove("hidden");
+    } else {
+      panel.classList.add("hidden");
+    }
   }
 
   function updateButtons() {
@@ -224,6 +246,28 @@
       if (e.cancelable) e.preventDefault();
       return;
     }
+
+    // Music symbol placement mode
+    if (tool === "music") {
+      e.preventDefault();
+      if (!selectedMusicSymbol) return;
+      const pos = getPos(e);
+      const px = pos.x / musicCanvas.width;
+      const py = pos.y / musicCanvas.height;
+      const color = $("#music-color").value;
+      const fontSize = parseInt($("#music-size").value, 10);
+
+      if (!musicAnnotations[pageNum]) musicAnnotations[pageNum] = [];
+      if (!musicUndoStacks[pageNum]) musicUndoStacks[pageNum] = [];
+      // Save undo state
+      musicUndoStacks[pageNum].push(JSON.parse(JSON.stringify(musicAnnotations[pageNum])));
+      if (musicUndoStacks[pageNum].length > 30) musicUndoStacks[pageNum].shift();
+
+      musicAnnotations[pageNum].push({ symbol: selectedMusicSymbol, px, py, color, fontSize });
+      renderMusicSymbols();
+      return;
+    }
+
     e.preventDefault();
     drawing = true;
     const pos = getPos(e);
@@ -335,6 +379,10 @@
 
   // ── Undo ──────────────────────────────────────────────────────
   function undo() {
+    if (tool === "music") {
+      undoMusicSymbol();
+      return;
+    }
     const stack = undoStacks[pageNum];
     if (!stack || stack.length === 0) return;
     const prev = stack.pop();
@@ -352,6 +400,7 @@
     tmpCanvas.height = pdfCanvas.height;
     const tmpCtx = tmpCanvas.getContext("2d");
     tmpCtx.drawImage(pdfCanvas, 0, 0);
+    if (musicVisible) tmpCtx.drawImage(musicCanvas, 0, 0);
     tmpCtx.drawImage(annCanvas, 0, 0);
 
     const link = document.createElement("a");
@@ -359,6 +408,156 @@
     link.href = tmpCanvas.toDataURL("image/png");
     link.click();
   }
+
+  // ── Music Symbol Rendering ────────────────────────────────────
+  function renderMusicSymbols() {
+    musicCtx.clearRect(0, 0, musicCanvas.width, musicCanvas.height);
+    if (!musicVisible) return;
+    const syms = musicAnnotations[pageNum];
+    if (!syms || syms.length === 0) return;
+
+    syms.forEach((s) => {
+      const x = s.px * musicCanvas.width;
+      const y = s.py * musicCanvas.height;
+      const fs = s.fontSize * (scale / 1.5);
+      musicCtx.font = `${fs}px "Segoe UI Symbol", "Noto Music", "DejaVu Sans", "Arial Unicode MS", sans-serif`;
+      musicCtx.fillStyle = s.color;
+      musicCtx.textAlign = "center";
+      musicCtx.textBaseline = "middle";
+      musicCtx.fillText(s.symbol, x, y);
+    });
+  }
+
+  function undoMusicSymbol() {
+    const stack = musicUndoStacks[pageNum];
+    if (!stack || stack.length === 0) return;
+    musicAnnotations[pageNum] = stack.pop();
+    renderMusicSymbols();
+  }
+
+  function toggleMusicVisibility() {
+    musicVisible = !musicVisible;
+    const btn = $("#btn-toggle-music");
+    btn.classList.toggle("music-hidden", !musicVisible);
+    btn.title = musicVisible ? "Hide music annotations" : "Show music annotations";
+    renderMusicSymbols();
+  }
+
+  // ── Music Symbol Definitions ──────────────────────────────────
+  const MUSIC_SYMBOLS = [
+    { group: "Fingers", items: [
+      { label: "1", symbol: "1" },
+      { label: "2", symbol: "2" },
+      { label: "3", symbol: "3" },
+      { label: "4", symbol: "4" },
+      { label: "5", symbol: "5" },
+    ]},
+    { group: "Accidentals", items: [
+      { label: "♯", symbol: "♯" },
+      { label: "♭", symbol: "♭" },
+      { label: "♮", symbol: "♮" },
+      { label: "𝄪", symbol: "𝄪" },
+      { label: "𝄫", symbol: "𝄫" },
+    ]},
+    { group: "Dynamics", items: [
+      { label: "ppp", symbol: "ppp" },
+      { label: "pp", symbol: "pp" },
+      { label: "p", symbol: "p" },
+      { label: "mp", symbol: "mp" },
+      { label: "mf", symbol: "mf" },
+      { label: "f", symbol: "f" },
+      { label: "ff", symbol: "ff" },
+      { label: "fff", symbol: "fff" },
+      { label: "sfz", symbol: "sfz" },
+      { label: "fp", symbol: "fp" },
+      { label: "cresc.", symbol: "cresc." },
+      { label: "dim.", symbol: "dim." },
+    ]},
+    { group: "Tempo & Expression", items: [
+      { label: "rit.", symbol: "rit." },
+      { label: "accel.", symbol: "accel." },
+      { label: "a tempo", symbol: "a tempo" },
+      { label: "dolce", symbol: "dolce" },
+      { label: "legato", symbol: "legato" },
+      { label: "D.C.", symbol: "D.C." },
+      { label: "D.S.", symbol: "D.S." },
+      { label: "Fine", symbol: "Fine" },
+      { label: "Coda 𝄌", symbol: "𝄌" },
+      { label: "Segno 𝄋", symbol: "𝄋" },
+    ]},
+    { group: "Articulations & Ornaments", items: [
+      { label: ".", symbol: "•" },
+      { label: ">", symbol: ">" },
+      { label: "^", symbol: "^" },
+      { label: "~", symbol: "~" },
+      { label: "𝄐", symbol: "𝄐" },
+      { label: "tr", symbol: "tr" },
+    ]},
+    { group: "Bowing & Breath", items: [
+      { label: "∨", symbol: "∨" },
+      { label: "∏", symbol: "∏" },
+      { label: ",", symbol: "," },
+      { label: "//", symbol: "//" },
+    ]},
+    { group: "Pedal", items: [
+      { label: "Ped.", symbol: "Ped." },
+      { label: "*", symbol: "✱" },
+    ]},
+    { group: "Hairpins", items: [
+      { label: "<", symbol: "〈" },
+      { label: ">", symbol: "〉" },
+    ]},
+  ];
+
+  // ── Build Music Symbol Picker ─────────────────────────────────
+  function initMusicPanel() {
+    const grid = $("#music-symbol-grid");
+    const selectedLabel = $("#music-selected");
+    const sizeSlider = $("#music-size");
+    const sizeLabel = $("#music-size-label");
+
+    MUSIC_SYMBOLS.forEach((group) => {
+      const header = document.createElement("div");
+      header.className = "music-sym-group";
+      header.textContent = group.group;
+      grid.appendChild(header);
+
+      group.items.forEach((item) => {
+        const btn = document.createElement("button");
+        btn.className = "music-sym-btn";
+        btn.type = "button";
+        btn.title = item.label;
+        // Use smaller font for text-based symbols
+        if (item.symbol.length > 2) {
+          const span = document.createElement("span");
+          span.className = "sym-label";
+          span.textContent = item.symbol;
+          btn.appendChild(span);
+        } else {
+          btn.textContent = item.symbol;
+        }
+
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".music-sym-btn").forEach((b) => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          selectedMusicSymbol = item.symbol;
+          selectedLabel.textContent = `Selected: ${item.label} — tap on the score to place`;
+        });
+
+        grid.appendChild(btn);
+      });
+    });
+
+    sizeSlider.addEventListener("input", () => {
+      sizeLabel.textContent = sizeSlider.value;
+    });
+
+    $("#music-panel-close").addEventListener("click", () => {
+      setTool("none");
+    });
+  }
+
+  initMusicPanel();
 
   // ── File open / drag-drop ─────────────────────────────────────
   fileInput.addEventListener("change", (e) => {
@@ -407,6 +606,8 @@
   $("#btn-draw").addEventListener("click", () => setTool("draw"));
   $("#btn-text").addEventListener("click", () => setTool("text"));
   $("#btn-eraser").addEventListener("click", () => setTool("eraser"));
+  $("#btn-music").addEventListener("click", () => setTool("music"));
+  $("#btn-toggle-music").addEventListener("click", toggleMusicVisibility);
   $("#btn-undo").addEventListener("click", undo);
   $("#btn-save").addEventListener("click", saveAnnotated);
 

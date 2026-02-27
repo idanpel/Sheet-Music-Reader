@@ -32,6 +32,9 @@
     <button id="btn-undo" title="Undo">↩️</button>
     <button id="btn-save" title="Save annotated PDF">💾</button>
     <div class="separator"></div>
+    <button id="btn-music" class="tool-btn" title="Music symbols">🎵</button>
+    <button id="btn-toggle-music" title="Show/hide music annotations">👁️</button>
+    <div class="separator"></div>
     <button id="btn-fullscreen" title="Full screen">⛶</button>
   </header>
 
@@ -42,6 +45,7 @@
   <main id="viewer">
     <div id="canvas-wrapper">
       <canvas id="pdf-canvas"></canvas>
+      <canvas id="music-canvas"></canvas>
       <canvas id="annotation-canvas"></canvas>
     </div>
     <div id="drop-zone">
@@ -60,6 +64,22 @@
       <div id="gdrive-breadcrumb"></div>
       <div id="gdrive-file-list"></div>
     </div>
+  </div>
+
+  <!-- Music Symbol Picker Panel -->
+  <div id="music-panel" class="hidden">
+    <div id="music-panel-header">
+      <span>Music Symbols</span>
+      <button id="music-panel-close">&times;</button>
+    </div>
+    <div id="music-panel-controls">
+      <label>Color: <input type="color" id="music-color" value="#FF0000" /></label>
+      <label>Size: <input type="range" id="music-size" min="12" max="60" value="28" />
+        <span id="music-size-label">28</span>
+      </label>
+    </div>
+    <div id="music-symbol-grid"></div>
+    <div id="music-selected">Tap a symbol, then tap the score to place it</div>
   </div>
 
   <script src="app.js"></script>
