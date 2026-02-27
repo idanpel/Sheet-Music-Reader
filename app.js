@@ -367,7 +367,7 @@
 
   // ── Google Drive Integration (read-only OAuth) ────────────────
   // Replace with your own OAuth Client ID from Google Cloud Console
-  const GDRIVE_CLIENT_ID = "YOUR_CLIENT_ID_HERE.apps.googleusercontent.com";
+  const GDRIVE_CLIENT_ID = "339204074130-fhe2b0djcargt6g016vh575bflgf17aq.apps.googleusercontent.com";
   const GDRIVE_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
 
