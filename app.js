@@ -365,19 +365,13 @@
     if (e.key === "ArrowRight") nextPage();
   });
 
-  // ── Google Drive Integration (folder-restricted via Picker) ─────
-  // Your OAuth Client ID from Google Cloud Console
+  // ── Google Drive Integration (read-only, folder browser) ────────
   const GDRIVE_CLIENT_ID = "339204074130-vucvvbpvlipuqak9f0h4m7b8876solrg.apps.googleusercontent.com";
-  // API key for the Picker API (create at Google Cloud Console → Credentials → API Key)
-  const GDRIVE_API_KEY = "AIzaSyAMwO5j93JgB3eZcFHVQ6br06eMoYSzr8I";
-  // Restricted scope: read-only access (app only browses the folder you select)
   const GDRIVE_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
 
   let gdriveToken = null;
-  let gdriveSelectedFolder = null; // { id, name } — the folder chosen via Picker
   let gdriveFolderStack = [];
-  let pickerApiLoaded = false;
 
   const gdriveModal   = $("#gdrive-modal");
   const gdriveTitle   = $("#gdrive-title");
@@ -385,20 +379,12 @@
   const gdriveBread   = $("#gdrive-breadcrumb");
   const gdriveList    = $("#gdrive-file-list");
 
-  // ── Load Picker API ──────────────────────────────────────────
-  function loadPickerApi() {
-    return new Promise((resolve) => {
-      if (pickerApiLoaded) { resolve(); return; }
-      gapi.load("picker", () => { pickerApiLoaded = true; resolve(); });
-    });
-  }
-
   // ── OAuth: request token via Google Identity Services ─────────
-  function gdriveAuth(callback) {
+  function gdriveAuth() {
     if (typeof google === "undefined" || !google.accounts) {
       gdriveStatus.textContent = "⏳ Google API loading, please wait...";
       gdriveModal.classList.remove("hidden");
-      setTimeout(() => gdriveAuth(callback), 1000);
+      setTimeout(gdriveAuth, 1000);
       return;
     }
 
@@ -412,52 +398,18 @@
         }
         gdriveToken = response.access_token;
         gdriveStatus.textContent = "";
-        if (callback) callback();
+        gdriveTitle.textContent = "Google Drive";
+        gdriveFolderStack = [{ id: "root", name: "My Drive" }];
+        gdriveListFiles("root");
       },
     });
 
+    gdriveModal.classList.remove("hidden");
     gdriveStatus.textContent = "🔑 Signing in...";
     tokenClient.requestAccessToken();
   }
 
-  // ── Show Google Picker to select a folder ─────────────────────
-  async function showFolderPicker() {
-    if (!gdriveToken) {
-      gdriveAuth(showFolderPicker);
-      return;
-    }
-
-    await loadPickerApi();
-
-    const folderView = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-      .setSelectFolderEnabled(true)
-      .setMimeTypes("application/vnd.google-apps.folder");
-
-    const picker = new google.picker.PickerBuilder()
-      .setTitle("Select a folder to browse PDFs from")
-      .addView(folderView)
-      .setOAuthToken(gdriveToken)
-      .setDeveloperKey(GDRIVE_API_KEY)
-      .setCallback(onFolderPicked)
-      .build();
-
-    picker.setVisible(true);
-  }
-
-  // ── Handle folder selection ───────────────────────────────────
-  function onFolderPicked(data) {
-    if (data.action === google.picker.Action.PICKED) {
-      const folder = data.docs[0];
-      gdriveSelectedFolder = { id: folder.id, name: folder.name };
-      gdriveFolderStack = [{ id: folder.id, name: folder.name }];
-
-      gdriveTitle.textContent = "📁 " + folder.name;
-      gdriveModal.classList.remove("hidden");
-      gdriveListFiles(folder.id);
-    }
-  }
-
-  // ── List PDFs in the selected folder ──────────────────────────
+  // ── List files in a folder ────────────────────────────────────
   async function gdriveListFiles(folderId) {
     gdriveList.innerHTML = '<p class="gdrive-loading">Loading...</p>';
     updateBreadcrumb();
@@ -582,29 +534,15 @@
   }
 
   // ── Drive UI wiring ──────────────────────────────────────────
-  // Button to change folder (re-open Picker)
-  const changeFolderBtn = document.createElement("button");
-  changeFolderBtn.textContent = "📁 Change folder";
-  changeFolderBtn.className = "gdrive-change-folder";
-  changeFolderBtn.addEventListener("click", showFolderPicker);
-
   $("#btn-gdrive").addEventListener("click", () => {
-    if (gdriveSelectedFolder && gdriveToken) {
-      // Already have a folder selected — show it with option to change
-      gdriveTitle.textContent = "📁 " + gdriveSelectedFolder.name;
+    if (gdriveToken) {
       gdriveModal.classList.remove("hidden");
-      gdriveFolderStack = [{ id: gdriveSelectedFolder.id, name: gdriveSelectedFolder.name }];
-      gdriveListFiles(gdriveSelectedFolder.id);
+      gdriveFolderStack = [{ id: "root", name: "My Drive" }];
+      gdriveListFiles("root");
     } else {
-      // First time — open Picker to choose a folder
-      gdriveModal.classList.remove("hidden");
-      gdriveStatus.textContent = "📂 Choose a folder from your Google Drive...";
-      showFolderPicker();
+      gdriveAuth();
     }
   });
-
-  // Add "Change folder" button to modal header
-  document.querySelector(".modal-header").appendChild(changeFolderBtn);
 
   $("#gdrive-close").addEventListener("click", () => {
     gdriveModal.classList.add("hidden");
