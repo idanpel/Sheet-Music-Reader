@@ -7,11 +7,13 @@
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <!-- Top Bar -->
   <header id="toolbar">
     <button id="btn-open" title="Open PDF">📂</button>
+    <button id="btn-gdrive" title="Open from Google Drive">☁️</button>
     <button id="btn-prev" title="Previous page">◀</button>
     <span id="page-info">0 / 0</span>
     <button id="btn-next" title="Next page">▶</button>
@@ -44,6 +46,19 @@
       <p>📄 Tap <strong>📂</strong> or drop a PDF here</p>
     </div>
   </main>
+
+  <!-- Google Drive folder browser modal -->
+  <div id="gdrive-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="gdrive-title">Google Drive</h3>
+        <button id="gdrive-close" title="Close">&times;</button>
+      </div>
+      <div id="gdrive-status"></div>
+      <div id="gdrive-breadcrumb"></div>
+      <div id="gdrive-file-list"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

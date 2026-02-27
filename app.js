@@ -364,4 +364,191 @@
     if (e.key === "ArrowLeft")  prevPage();
     if (e.key === "ArrowRight") nextPage();
   });
+
+  // ── Google Drive Integration (read-only OAuth) ────────────────
+  // Replace with your own OAuth Client ID from Google Cloud Console
+  const GDRIVE_CLIENT_ID = "YOUR_CLIENT_ID_HERE.apps.googleusercontent.com";
+  const GDRIVE_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
+  const DRIVE_API = "https://www.googleapis.com/drive/v3";
+
+  let gdriveToken = null;
+  let gdriveFolderStack = []; // breadcrumb navigation stack
+
+  const gdriveModal   = $("#gdrive-modal");
+  const gdriveTitle   = $("#gdrive-title");
+  const gdriveStatus  = $("#gdrive-status");
+  const gdriveBread   = $("#gdrive-breadcrumb");
+  const gdriveList    = $("#gdrive-file-list");
+
+  // ── OAuth: request token via Google Identity Services ─────────
+  function gdriveAuth() {
+    if (typeof google === "undefined" || !google.accounts) {
+      gdriveStatus.textContent = "⏳ Google API loading, please wait...";
+      gdriveModal.classList.remove("hidden");
+      setTimeout(gdriveAuth, 1000);
+      return;
+    }
+
+    const tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GDRIVE_CLIENT_ID,
+      scope: GDRIVE_SCOPES,
+      callback: (response) => {
+        if (response.error) {
+          gdriveStatus.textContent = "❌ Auth failed: " + response.error;
+          return;
+        }
+        gdriveToken = response.access_token;
+        gdriveStatus.textContent = "";
+        gdriveFolderStack = [{ id: "root", name: "My Drive" }];
+        gdriveListFiles("root");
+      },
+    });
+
+    gdriveModal.classList.remove("hidden");
+    gdriveStatus.textContent = "🔑 Signing in...";
+    tokenClient.requestAccessToken();
+  }
+
+  // ── List files in a folder ────────────────────────────────────
+  async function gdriveListFiles(folderId) {
+    gdriveList.innerHTML = '<p class="gdrive-loading">Loading...</p>';
+    updateBreadcrumb();
+
+    const query = `'${folderId}' in parents and trashed = false and (mimeType = 'application/pdf' or mimeType = 'application/vnd.google-apps.folder')`;
+    const fields = "files(id,name,mimeType,iconLink,modifiedTime,size)";
+    const orderBy = "folder,name";
+
+    try {
+      const res = await fetch(
+        `${DRIVE_API}/files?q=${encodeURIComponent(query)}&fields=${encodeURIComponent(fields)}&orderBy=${encodeURIComponent(orderBy)}&pageSize=100`,
+        { headers: { Authorization: `Bearer ${gdriveToken}` } }
+      );
+
+      if (res.status === 401) {
+        gdriveToken = null;
+        gdriveStatus.textContent = "⚠️ Session expired. Click ☁️ again to reconnect.";
+        gdriveList.innerHTML = "";
+        return;
+      }
+
+      const data = await res.json();
+      renderFileList(data.files || []);
+    } catch (err) {
+      gdriveList.innerHTML = `<p class="gdrive-error">Error: ${err.message}</p>`;
+    }
+  }
+
+  // ── Render file/folder list ───────────────────────────────────
+  function renderFileList(files) {
+    gdriveList.innerHTML = "";
+
+    if (files.length === 0) {
+      gdriveList.innerHTML = '<p class="gdrive-empty">No PDFs or folders found here.</p>';
+      return;
+    }
+
+    files.forEach((file) => {
+      const isFolder = file.mimeType === "application/vnd.google-apps.folder";
+      const item = document.createElement("div");
+      item.className = "gdrive-item" + (isFolder ? " gdrive-folder" : " gdrive-pdf");
+
+      const icon = isFolder ? "📁" : "📄";
+      const sizeStr = file.size ? ` (${formatBytes(file.size)})` : "";
+
+      item.innerHTML = `
+        <span class="gdrive-icon">${icon}</span>
+        <span class="gdrive-name">${escapeHtml(file.name)}${sizeStr}</span>
+      `;
+
+      item.addEventListener("click", () => {
+        if (isFolder) {
+          gdriveFolderStack.push({ id: file.id, name: file.name });
+          gdriveListFiles(file.id);
+        } else {
+          gdriveOpenPdf(file.id, file.name);
+        }
+      });
+
+      gdriveList.appendChild(item);
+    });
+  }
+
+  // ── Breadcrumb navigation ─────────────────────────────────────
+  function updateBreadcrumb() {
+    gdriveBread.innerHTML = "";
+    gdriveFolderStack.forEach((folder, i) => {
+      const span = document.createElement("span");
+      span.className = "gdrive-crumb";
+      span.textContent = folder.name;
+      if (i < gdriveFolderStack.length - 1) {
+        span.addEventListener("click", () => {
+          gdriveFolderStack = gdriveFolderStack.slice(0, i + 1);
+          gdriveListFiles(folder.id);
+        });
+      } else {
+        span.classList.add("current");
+      }
+      gdriveBread.appendChild(span);
+      if (i < gdriveFolderStack.length - 1) {
+        const sep = document.createElement("span");
+        sep.className = "gdrive-crumb-sep";
+        sep.textContent = " › ";
+        gdriveBread.appendChild(sep);
+      }
+    });
+  }
+
+  // ── Download and open a PDF from Drive ────────────────────────
+  async function gdriveOpenPdf(fileId, fileName) {
+    gdriveStatus.textContent = `⏳ Loading "${fileName}"...`;
+
+    try {
+      const res = await fetch(
+        `${DRIVE_API}/files/${fileId}?alt=media`,
+        { headers: { Authorization: `Bearer ${gdriveToken}` } }
+      );
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+
+      gdriveModal.classList.add("hidden");
+      gdriveStatus.textContent = "";
+      await loadPDF(new Uint8Array(buf));
+    } catch (err) {
+      gdriveStatus.textContent = `❌ Failed to load: ${err.message}`;
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function formatBytes(bytes) {
+    bytes = parseInt(bytes, 10);
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1048576).toFixed(1) + " MB";
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement("div");
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // ── Drive UI wiring ──────────────────────────────────────────
+  $("#btn-gdrive").addEventListener("click", () => {
+    if (gdriveToken) {
+      gdriveModal.classList.remove("hidden");
+      gdriveFolderStack = [{ id: "root", name: "My Drive" }];
+      gdriveListFiles("root");
+    } else {
+      gdriveAuth();
+    }
+  });
+
+  $("#gdrive-close").addEventListener("click", () => {
+    gdriveModal.classList.add("hidden");
+  });
+
+  gdriveModal.addEventListener("click", (e) => {
+    if (e.target === gdriveModal) gdriveModal.classList.add("hidden");
+  });
 })();
