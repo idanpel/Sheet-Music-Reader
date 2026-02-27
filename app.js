@@ -255,13 +255,18 @@
   async function addToLibrary(name, bytes) {
     if (!db) return;
     try {
+      // Store as ArrayBuffer (more reliable in IndexedDB than Uint8Array)
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
       await dbPut("library", null, {
         name,
         size: bytes.length,
         lastOpened: Date.now(),
-        data: bytes,
+        data: buffer,
       });
-    } catch (_) { /* ignore */ }
+    } catch (err) {
+      console.error("Failed to save to library:", err);
+      showToast("⚠️ Could not save to library");
+    }
   }
 
   async function renderLibrary() {
@@ -296,7 +301,8 @@
 
         div.querySelector(".library-item-info").addEventListener("click", async () => {
           $("#library-modal").classList.add("hidden");
-          await loadPDF(new Uint8Array(item.data), item.name);
+          const arr = item.data instanceof ArrayBuffer ? new Uint8Array(item.data) : new Uint8Array(item.data);
+          await loadPDF(arr, item.name);
         });
 
         div.querySelector(".library-item-delete").addEventListener("click", async (e) => {
