@@ -7,50 +7,152 @@
 
   // ── DOM refs ──────────────────────────────────────────────────
   const $ = (s) => document.querySelector(s);
-  const fileInput   = $("#file-input");
-  const pdfCanvas   = $("#pdf-canvas");
-  const annCanvas   = $("#annotation-canvas");
-  const musicCanvas = $("#music-canvas");
-  const pdfCtx      = pdfCanvas.getContext("2d");
-  const annCtx      = annCanvas.getContext("2d");
-  const musicCtx    = musicCanvas.getContext("2d");
-  const wrapper     = $("#canvas-wrapper");
-  const dropZone    = $("#drop-zone");
-  const pageInfo    = $("#page-info");
-  const zoomLabel   = $("#zoom-level");
-  const colorPicker = $("#color-picker");
+  const fileInput    = $("#file-input");
+  const pdfCanvas    = $("#pdf-canvas");
+  const annCanvas    = $("#annotation-canvas");
+  const musicCanvas  = $("#music-canvas");
+  const pdfCtx       = pdfCanvas.getContext("2d");
+  const annCtx       = annCanvas.getContext("2d");
+  const musicCtx     = musicCanvas.getContext("2d");
+  const wrapper      = $("#canvas-wrapper");
+  const dropZone     = $("#drop-zone");
+  const pageInfo     = $("#page-info");
+  const zoomLabel    = $("#zoom-level");
+  const colorPicker  = $("#color-picker");
+  const penWidthEl   = $("#pen-width");
+  const toolbar      = $("#toolbar");
+  const docNameEl    = $("#toolbar-doc-name");
+  const eraserCursor = $("#eraser-cursor");
+  const statusToast  = $("#status-toast");
 
   // ── State ─────────────────────────────────────────────────────
   let pdfDoc     = null;
+  let pdfBytes   = null; // raw PDF bytes for persistence
+  let pdfName    = "";   // filename of current PDF
   let pageNum    = 1;
   let totalPages = 0;
   let scale      = 1.5;
-  let tool       = "none"; // highlight | underline | draw | text | eraser | music | none
+  let tool       = "none";
   let drawing    = false;
   let currentPath = [];
+  let immersiveMode = false;
+  let toolbarAutoHideTimer = null;
 
   // Music annotation state
-  let selectedMusicSymbol = null;  // current symbol to place
-  let musicAnnotations = {};       // { [pageNum]: [{symbol,px,py,color,fontSize}] }
-  let musicVisible = true;         // toggle music layer visibility
-  let musicUndoStacks = {};        // undo stacks for music symbols per page
+  let selectedMusicSymbol = null;
+  let musicAnnotations = {};
+  let musicVisible = true;
+  let musicUndoStacks = {};
 
-  // Navigation gesture tracking (sheet music mode)
+  // Navigation gesture tracking
   let navStartX = 0;
   let navStartY = 0;
   let navStartTime = 0;
-  let isNavigating = false; // debounce flag to prevent double-flips
-  const SWIPE_THRESHOLD = 80;   // min px horizontal movement (raised for tablet)
-  const SWIPE_TIME_LIMIT = 400; // max ms for a swipe
-  const TAP_ZONE_RATIO = 0.25;  // left/right 25% of page
+  let isNavigating = false;
+  const SWIPE_THRESHOLD = 80;
+  const SWIPE_TIME_LIMIT = 400;
+  const TAP_ZONE_RATIO = 0.25;
 
-  // Page render cache for fast navigation
+  // Page render cache
   const pageCache = {};
 
   // Per-page annotation layers stored as ImageData
   const annotations = {};
-  // Undo stacks per page
   const undoStacks = {};
+
+  // Wake Lock
+  let wakeLock = null;
+
+  // ── IndexedDB for persistence ─────────────────────────────────
+  const DB_NAME = "ScorePadDB";
+  const DB_VERSION = 2;
+  let db = null;
+
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains("annotations")) {
+          d.createObjectStore("annotations");
+        }
+        if (!d.objectStoreNames.contains("library")) {
+          d.createObjectStore("library", { keyPath: "name" });
+        }
+        if (!d.objectStoreNames.contains("state")) {
+          d.createObjectStore("state");
+        }
+      };
+      req.onsuccess = () => { db = req.result; resolve(db); };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function dbPut(store, key, value) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readwrite");
+      const s = tx.objectStore(store);
+      const req = key !== undefined ? s.put(value, key) : s.put(value);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function dbGet(store, key) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readonly");
+      const s = tx.objectStore(store);
+      const req = s.get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function dbGetAll(store) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readonly");
+      const s = tx.objectStore(store);
+      const req = s.getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function dbDelete(store, key) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readwrite");
+      const s = tx.objectStore(store);
+      const req = s.delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // ── Wake Lock API ─────────────────────────────────────────────
+  async function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (_) { /* ignore */ }
+  }
+
+  function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release(); wakeLock = null; }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && pdfDoc) acquireWakeLock();
+  });
+
+  // ── Toast ─────────────────────────────────────────────────────
+  let toastTimer = null;
+  function showToast(msg, duration = 2000) {
+    statusToast.textContent = msg;
+    statusToast.classList.remove("hidden");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => statusToast.classList.add("hidden"), duration);
+  }
 
   // ── Helpers ───────────────────────────────────────────────────
   function saveAnnotationState() {
@@ -73,31 +175,167 @@
     }
   }
 
+  // ── Persist annotations to IndexedDB ──────────────────────────
+  async function persistAnnotations() {
+    if (!db || !pdfDoc || !pdfName) return;
+    storePageAnnotations();
+
+    // Convert ImageData annotations to serializable format (base64 data URLs)
+    const serialized = {};
+    for (const [pg, imgData] of Object.entries(annotations)) {
+      const c = document.createElement("canvas");
+      c.width = imgData.width;
+      c.height = imgData.height;
+      c.getContext("2d").putImageData(imgData, 0, 0);
+      serialized[pg] = c.toDataURL("image/png");
+    }
+
+    const data = {
+      annotations: serialized,
+      musicAnnotations: JSON.parse(JSON.stringify(musicAnnotations)),
+      pageNum,
+      scale,
+    };
+
+    try {
+      await dbPut("annotations", pdfName, data);
+    } catch (_) { /* ignore */ }
+  }
+
+  async function loadPersistedAnnotations() {
+    if (!db || !pdfName) return;
+    try {
+      const data = await dbGet("annotations", pdfName);
+      if (!data) return;
+
+      // Restore last viewed page and scale
+      if (data.pageNum) pageNum = Math.min(data.pageNum, totalPages);
+      if (data.scale) {
+        scale = data.scale;
+        zoomLabel.textContent = `${Math.round((scale / 1.5) * 100)}%`;
+      }
+
+      // Restore music annotations
+      if (data.musicAnnotations) {
+        Object.assign(musicAnnotations, data.musicAnnotations);
+      }
+
+      // Restore drawing annotations (from data URLs back to ImageData)
+      if (data.annotations) {
+        const promises = Object.entries(data.annotations).map(([pg, dataUrl]) => {
+          return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              const c = document.createElement("canvas");
+              c.width = img.width;
+              c.height = img.height;
+              const ctx = c.getContext("2d");
+              ctx.drawImage(img, 0, 0);
+              annotations[pg] = ctx.getImageData(0, 0, c.width, c.height);
+              resolve();
+            };
+            img.onerror = resolve;
+            img.src = dataUrl;
+          });
+        });
+        await Promise.all(promises);
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  // Auto-save annotations periodically and on page change
+  let persistTimer = null;
+  function schedulePersist() {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => persistAnnotations(), 2000);
+  }
+
+  // ── Library management ────────────────────────────────────────
+  async function addToLibrary(name, bytes) {
+    if (!db) return;
+    try {
+      await dbPut("library", undefined, {
+        name,
+        size: bytes.length,
+        lastOpened: Date.now(),
+        data: bytes,
+      });
+    } catch (_) { /* ignore */ }
+  }
+
+  async function renderLibrary() {
+    const list = $("#library-list");
+    if (!db) { list.innerHTML = '<p class="library-empty">Database not ready</p>'; return; }
+
+    try {
+      const items = await dbGetAll("library");
+      if (items.length === 0) {
+        list.innerHTML = '<p class="library-empty">No recent scores.<br>Open a PDF to get started.</p>';
+        return;
+      }
+
+      items.sort((a, b) => (b.lastOpened || 0) - (a.lastOpened || 0));
+      list.innerHTML = "";
+
+      items.forEach((item) => {
+        const div = document.createElement("div");
+        div.className = "library-item";
+        const dateStr = item.lastOpened
+          ? new Date(item.lastOpened).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+          : "";
+        const sizeStr = formatBytes(item.size || 0);
+        div.innerHTML = `
+          <span class="library-item-icon">🎼</span>
+          <div class="library-item-info">
+            <div class="library-item-name">${escapeHtml(item.name)}</div>
+            <div class="library-item-meta">${sizeStr} · ${dateStr}</div>
+          </div>
+          <button class="library-item-delete" title="Remove">🗑️</button>
+        `;
+
+        div.querySelector(".library-item-info").addEventListener("click", async () => {
+          $("#library-modal").classList.add("hidden");
+          await loadPDF(new Uint8Array(item.data), item.name);
+        });
+
+        div.querySelector(".library-item-delete").addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await dbDelete("library", item.name);
+          await dbDelete("annotations", item.name);
+          renderLibrary();
+        });
+
+        list.appendChild(div);
+      });
+    } catch (_) {
+      list.innerHTML = '<p class="library-empty">Failed to load library</p>';
+    }
+  }
+
   // ── Render page ───────────────────────────────────────────────
   async function renderPageToCache(num) {
-    if (!pdfDoc || pageCache[num + '_' + scale]) return;
+    if (!pdfDoc || pageCache[num + "_" + scale]) return;
     const page = await pdfDoc.getPage(num);
     const viewport = page.getViewport({ scale });
-    const offCanvas = document.createElement('canvas');
+    const offCanvas = document.createElement("canvas");
     offCanvas.width = viewport.width;
     offCanvas.height = viewport.height;
-    const offCtx = offCanvas.getContext('2d');
+    const offCtx = offCanvas.getContext("2d");
     await page.render({ canvasContext: offCtx, viewport }).promise;
-    pageCache[num + '_' + scale] = offCanvas;
+    pageCache[num + "_" + scale] = offCanvas;
   }
 
   async function renderPage(num) {
     if (!pdfDoc) return;
-    const cacheKey = num + '_' + scale;
+    const cacheKey = num + "_" + scale;
 
-    // Render to cache if not already there
     if (!pageCache[cacheKey]) {
       const page = await pdfDoc.getPage(num);
       const viewport = page.getViewport({ scale });
-      const offCanvas = document.createElement('canvas');
+      const offCanvas = document.createElement("canvas");
       offCanvas.width = viewport.width;
       offCanvas.height = viewport.height;
-      const offCtx = offCanvas.getContext('2d');
+      const offCtx = offCanvas.getContext("2d");
       await page.render({ canvasContext: offCtx, viewport }).promise;
       pageCache[cacheKey] = offCanvas;
     }
@@ -115,13 +353,15 @@
     renderMusicSymbols();
     pageInfo.textContent = `${num} / ${totalPages}`;
 
-    // Pre-cache adjacent pages in background
+    // Pre-cache adjacent pages
     if (num > 1) renderPageToCache(num - 1);
     if (num < totalPages) renderPageToCache(num + 1);
   }
 
   // ── Load PDF ──────────────────────────────────────────────────
-  async function loadPDF(data) {
+  async function loadPDF(data, name) {
+    pdfBytes = data;
+    pdfName = name || "untitled.pdf";
     pdfDoc = await pdfjsLib.getDocument({ data }).promise;
     totalPages = pdfDoc.numPages;
     pageNum = 1;
@@ -129,11 +369,25 @@
     Object.keys(undoStacks).forEach((k) => delete undoStacks[k]);
     Object.keys(musicAnnotations).forEach((k) => delete musicAnnotations[k]);
     Object.keys(musicUndoStacks).forEach((k) => delete musicUndoStacks[k]);
+    Object.keys(pageCache).forEach((k) => delete pageCache[k]);
 
     wrapper.style.display = "block";
     dropZone.classList.add("hidden");
+    docNameEl.textContent = pdfName;
+
+    // Load persisted annotations (this may update pageNum/scale)
+    await loadPersistedAnnotations();
+
     updateButtons();
     await renderPage(pageNum);
+
+    // Wake lock
+    acquireWakeLock();
+
+    // Save to library
+    await addToLibrary(pdfName, data);
+
+    showToast(`Opened: ${pdfName} (${totalPages} pages)`);
   }
 
   // ── Navigation ────────────────────────────────────────────────
@@ -144,6 +398,7 @@
     pageNum--;
     renderPage(pageNum).then(() => { isNavigating = false; });
     updateButtons();
+    schedulePersist();
   }
 
   function nextPage() {
@@ -153,11 +408,12 @@
     pageNum++;
     renderPage(pageNum).then(() => { isNavigating = false; });
     updateButtons();
+    schedulePersist();
   }
 
   // ── Zoom ──────────────────────────────────────────────────────
   function clearPageCache() {
-    Object.keys(pageCache).forEach(k => delete pageCache[k]);
+    Object.keys(pageCache).forEach((k) => delete pageCache[k]);
   }
 
   function zoomIn() {
@@ -192,7 +448,7 @@
       $(map[tool])?.classList.add("active");
     }
     annCanvas.style.cursor =
-      tool === "eraser" ? "cell" : tool === "music" ? "copy" : tool === "none" ? "default" : "crosshair";
+      tool === "eraser" ? "none" : tool === "music" ? "copy" : tool === "none" ? "default" : "crosshair";
 
     // Show/hide music panel
     const panel = $("#music-panel");
@@ -201,12 +457,115 @@
     } else {
       panel.classList.add("hidden");
     }
+
+    // Show/hide eraser cursor
+    if (tool === "eraser") {
+      eraserCursor.classList.remove("hidden");
+      updateEraserCursorSize();
+    } else {
+      eraserCursor.classList.add("hidden");
+    }
+  }
+
+  function updateEraserCursorSize() {
+    const size = 20 * (scale / 1.5);
+    const rect = annCanvas.getBoundingClientRect();
+    const displaySize = size * (rect.width / annCanvas.width);
+    eraserCursor.style.width = displaySize + "px";
+    eraserCursor.style.height = displaySize + "px";
   }
 
   function updateButtons() {
     $("#btn-prev").disabled = pageNum <= 1;
     $("#btn-next").disabled = pageNum >= totalPages;
   }
+
+  // ── Immersive Mode (hide toolbar) ─────────────────────────────
+  function setImmersiveMode(on) {
+    immersiveMode = on;
+    if (on) {
+      toolbar.classList.add("toolbar-hidden");
+      document.body.classList.remove("toolbar-visible");
+      $("#btn-immersive").classList.add("active");
+      showToast("Immersive mode — double-tap center to show toolbar");
+    } else {
+      toolbar.classList.remove("toolbar-hidden");
+      document.body.classList.add("toolbar-visible");
+      $("#btn-immersive").classList.remove("active");
+      updateToolbarHeight();
+    }
+  }
+
+  function updateToolbarHeight() {
+    requestAnimationFrame(() => {
+      const h = toolbar.offsetHeight;
+      document.body.style.setProperty("--toolbar-h", h + "px");
+    });
+  }
+
+  // Auto-hide toolbar after inactivity when in immersive mode
+  function resetToolbarAutoHide() {
+    clearTimeout(toolbarAutoHideTimer);
+    if (immersiveMode && !toolbar.classList.contains("toolbar-hidden")) {
+      toolbarAutoHideTimer = setTimeout(() => {
+        toolbar.classList.add("toolbar-hidden");
+        document.body.classList.remove("toolbar-visible");
+      }, 4000);
+    }
+  }
+
+  // Double-tap detection for showing toolbar in immersive mode
+  let lastTapTime = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
+
+  function handleDoubleTapCenter(e) {
+    if (!immersiveMode || !pdfDoc) return false;
+    const touch = e.changedTouches ? e.changedTouches[0] : e;
+    const now = Date.now();
+    const dx = Math.abs(touch.clientX - lastTapX);
+    const dy = Math.abs(touch.clientY - lastTapY);
+
+    if (now - lastTapTime < 350 && dx < 30 && dy < 30) {
+      // Double-tap detected — check if it's in the center 50% of the screen
+      const rect = annCanvas.getBoundingClientRect();
+      const relX = (touch.clientX - rect.left) / rect.width;
+      if (relX > 0.25 && relX < 0.75) {
+        if (toolbar.classList.contains("toolbar-hidden")) {
+          toolbar.classList.remove("toolbar-hidden");
+          document.body.classList.add("toolbar-visible");
+          updateToolbarHeight();
+          resetToolbarAutoHide();
+        } else {
+          toolbar.classList.add("toolbar-hidden");
+          document.body.classList.remove("toolbar-visible");
+        }
+        lastTapTime = 0;
+        return true;
+      }
+    }
+
+    lastTapTime = now;
+    lastTapX = touch.clientX;
+    lastTapY = touch.clientY;
+    return false;
+  }
+
+  // ── Fullscreen ────────────────────────────────────────────────
+  const btnFs = $("#btn-fullscreen");
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen();
+    }
+  }
+  btnFs.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", () => {
+    btnFs.textContent = document.fullscreenElement ? "⛶" : "⛶";
+    btnFs.title = document.fullscreenElement ? "Exit full screen" : "Full screen";
+    btnFs.classList.toggle("active-fs", !!document.fullscreenElement);
+  });
 
   // ── Navigation feedback overlay ─────────────────────────────
   const navOverlay = document.createElement("div");
@@ -231,7 +590,71 @@
     };
   }
 
+  // ── Smooth drawing with quadratic curves ──────────────────────
+  function smoothLineTo(ctx, points) {
+    if (points.length < 2) return;
+    if (points.length === 2) {
+      ctx.lineTo(points[1].x, points[1].y);
+      ctx.stroke();
+      return;
+    }
+    const last = points[points.length - 1];
+    const prev = points[points.length - 2];
+    const midX = (prev.x + last.x) / 2;
+    const midY = (prev.y + last.y) / 2;
+    ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+    ctx.stroke();
+  }
+
+  // ── Inline text input ─────────────────────────────────────────
+  let textInputPos = null;
+  const textOverlay = $("#text-input-overlay");
+  const textField   = $("#text-input-field");
+
+  function showTextInput(canvasPos, screenX, screenY) {
+    textInputPos = canvasPos;
+    textField.value = "";
+    textOverlay.classList.remove("hidden");
+    textOverlay.style.left = Math.min(screenX, window.innerWidth - 220) + "px";
+    textOverlay.style.top = Math.min(screenY, window.innerHeight - 100) + "px";
+    setTimeout(() => textField.focus(), 50);
+  }
+
+  function commitTextInput() {
+    if (!textInputPos || !textField.value.trim()) {
+      textOverlay.classList.add("hidden");
+      return;
+    }
+    saveAnnotationState();
+    const fontSize = 16 * (scale / 1.5);
+    annCtx.font = `${fontSize}px sans-serif`;
+    annCtx.fillStyle = colorPicker.value;
+    const lines = textField.value.split("\n");
+    lines.forEach((line, i) => {
+      annCtx.fillText(line, textInputPos.x, textInputPos.y + i * (fontSize * 1.3));
+    });
+    storePageAnnotations();
+    schedulePersist();
+    textOverlay.classList.add("hidden");
+    textInputPos = null;
+  }
+
+  $("#text-input-ok").addEventListener("click", commitTextInput);
+  $("#text-input-cancel").addEventListener("click", () => {
+    textOverlay.classList.add("hidden");
+    textInputPos = null;
+  });
+  textField.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTextInput(); }
+    if (e.key === "Escape") { textOverlay.classList.add("hidden"); textInputPos = null; }
+    e.stopPropagation();
+  });
+
   // ── Drawing / annotation logic ────────────────────────────────
+  function getPenWidth() {
+    return parseInt(penWidthEl.value, 10) || 3;
+  }
+
   function onPointerDown(e) {
     if (!pdfDoc) return;
 
@@ -242,7 +665,6 @@
     navStartTime = Date.now();
 
     if (tool === "none") {
-      // Prevent default to stop browser scroll/zoom during navigation
       if (e.cancelable) e.preventDefault();
       return;
     }
@@ -259,41 +681,38 @@
 
       if (!musicAnnotations[pageNum]) musicAnnotations[pageNum] = [];
       if (!musicUndoStacks[pageNum]) musicUndoStacks[pageNum] = [];
-      // Save undo state
       musicUndoStacks[pageNum].push(JSON.parse(JSON.stringify(musicAnnotations[pageNum])));
       if (musicUndoStacks[pageNum].length > 30) musicUndoStacks[pageNum].shift();
 
       musicAnnotations[pageNum].push({ symbol: selectedMusicSymbol, px, py, color, fontSize });
       renderMusicSymbols();
+      schedulePersist();
       return;
     }
 
     e.preventDefault();
-    drawing = true;
     const pos = getPos(e);
-    currentPath = [pos];
 
+    // Text tool — use inline input instead of prompt()
     if (tool === "text") {
-      drawing = false;
-      const note = prompt("Enter note:");
-      if (!note) return;
-      saveAnnotationState();
-      annCtx.font = `${16 * (scale / 1.5)}px sans-serif`;
-      annCtx.fillStyle = colorPicker.value;
-      annCtx.fillText(note, pos.x, pos.y);
-      storePageAnnotations();
+      const screenX = touch.clientX;
+      const screenY = touch.clientY;
+      showTextInput(pos, screenX, screenY);
       return;
     }
 
+    drawing = true;
+    currentPath = [pos];
     saveAnnotationState();
 
-    annCtx.lineWidth = tool === "eraser" ? 20 * (scale / 1.5) : 3 * (scale / 1.5);
+    const pw = getPenWidth();
     annCtx.lineCap = "round";
     annCtx.lineJoin = "round";
 
     if (tool === "eraser") {
       annCtx.globalCompositeOperation = "destination-out";
       annCtx.strokeStyle = "rgba(0,0,0,1)";
+      annCtx.lineWidth = 20 * (scale / 1.5);
     } else if (tool === "highlight") {
       annCtx.globalCompositeOperation = "multiply";
       annCtx.strokeStyle = colorPicker.value;
@@ -302,10 +721,11 @@
     } else if (tool === "underline") {
       annCtx.globalCompositeOperation = "source-over";
       annCtx.strokeStyle = colorPicker.value;
-      annCtx.lineWidth = 2 * (scale / 1.5);
+      annCtx.lineWidth = pw * (scale / 1.5);
     } else {
       annCtx.globalCompositeOperation = "source-over";
       annCtx.strokeStyle = colorPicker.value;
+      annCtx.lineWidth = pw * (scale / 1.5);
     }
 
     annCtx.beginPath();
@@ -313,7 +733,14 @@
   }
 
   function onPointerMove(e) {
-    // Prevent browser scroll/zoom on touch during navigation mode
+    // Update eraser cursor position
+    if (tool === "eraser") {
+      const touch = e.touches ? e.touches[0] : e;
+      const size = parseInt(eraserCursor.style.width) || 20;
+      eraserCursor.style.left = (touch.clientX - size / 2) + "px";
+      eraserCursor.style.top = (touch.clientY - size / 2) + "px";
+    }
+
     if (tool === "none" && e.cancelable) e.preventDefault();
     if (!drawing) return;
     e.preventDefault();
@@ -321,7 +748,6 @@
     currentPath.push(pos);
 
     if (tool === "underline") {
-      // draw a straight horizontal line from start
       const start = currentPath[0];
       annCtx.clearRect(0, 0, annCanvas.width, annCanvas.height);
       if (undoStacks[pageNum]?.length) {
@@ -329,18 +755,23 @@
       }
       annCtx.globalCompositeOperation = "source-over";
       annCtx.strokeStyle = colorPicker.value;
-      annCtx.lineWidth = 2 * (scale / 1.5);
+      annCtx.lineWidth = getPenWidth() * (scale / 1.5);
       annCtx.beginPath();
       annCtx.moveTo(start.x, start.y);
       annCtx.lineTo(pos.x, start.y);
       annCtx.stroke();
     } else {
-      annCtx.lineTo(pos.x, pos.y);
-      annCtx.stroke();
+      // Use quadratic interpolation for smooth curves
+      smoothLineTo(annCtx, currentPath);
     }
   }
 
   function onPointerUp(e) {
+    // Handle double-tap for toolbar toggle in immersive mode
+    if (tool === "none" && immersiveMode && pdfDoc) {
+      if (handleDoubleTapCenter(e)) return;
+    }
+
     // Handle navigation when no annotation tool is active
     if (tool === "none" && pdfDoc) {
       if (e.cancelable) e.preventDefault();
@@ -352,14 +783,12 @@
       const rect = annCanvas.getBoundingClientRect();
       const relX = (touch.clientX - rect.left) / rect.width;
 
-      // Swipe detection (horizontal swipe, must exceed threshold)
       if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < SWIPE_TIME_LIMIT) {
         if (dx < 0) { nextPage(); showNavFeedback("next"); }
         else        { prevPage(); showNavFeedback("prev"); }
         return;
       }
 
-      // Tap zone detection (short tap, minimal movement)
       if (Math.abs(dx) < 15 && Math.abs(dy) < 15 && dt < 300) {
         if (relX >= 1 - TAP_ZONE_RATIO) {
           nextPage(); showNavFeedback("next");
@@ -375,6 +804,7 @@
     annCtx.globalCompositeOperation = "source-over";
     annCtx.globalAlpha = 1;
     storePageAnnotations();
+    schedulePersist();
   }
 
   // ── Undo ──────────────────────────────────────────────────────
@@ -388,6 +818,7 @@
     const prev = stack.pop();
     annCtx.putImageData(prev, 0, 0);
     storePageAnnotations();
+    schedulePersist();
   }
 
   // ── Save: composite PDF page + annotations into downloadable image ──
@@ -407,6 +838,7 @@
     link.download = `annotated_page_${pageNum}.png`;
     link.href = tmpCanvas.toDataURL("image/png");
     link.click();
+    showToast("Page saved as PNG");
   }
 
   // ── Music Symbol Rendering ────────────────────────────────────
@@ -433,6 +865,7 @@
     if (!stack || stack.length === 0) return;
     musicAnnotations[pageNum] = stack.pop();
     renderMusicSymbols();
+    schedulePersist();
   }
 
   function toggleMusicVisibility() {
@@ -527,7 +960,6 @@
         btn.className = "music-sym-btn";
         btn.type = "button";
         btn.title = item.label;
-        // Use smaller font for text-based symbols
         if (item.symbol.length > 2) {
           const span = document.createElement("span");
           span.className = "sym-label";
@@ -564,7 +996,7 @@
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => loadPDF(new Uint8Array(ev.target.result));
+    reader.onload = (ev) => loadPDF(new Uint8Array(ev.target.result), file.name);
     reader.readAsArrayBuffer(file);
   });
 
@@ -574,7 +1006,7 @@
     const file = e.dataTransfer.files[0];
     if (file?.type === "application/pdf") {
       const reader = new FileReader();
-      reader.onload = (ev) => loadPDF(new Uint8Array(ev.target.result));
+      reader.onload = (ev) => loadPDF(new Uint8Array(ev.target.result), file.name);
       reader.readAsArrayBuffer(file);
     }
   });
@@ -585,22 +1017,6 @@
   $("#btn-next").addEventListener("click", nextPage);
   $("#btn-zoom-in").addEventListener("click", zoomIn);
   $("#btn-zoom-out").addEventListener("click", zoomOut);
-
-  // ── Fullscreen ─────────────────────────────────────────────
-  const btnFs = $("#btn-fullscreen");
-  function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen();
-    }
-  }
-  btnFs.addEventListener("click", toggleFullscreen);
-  document.addEventListener("fullscreenchange", () => {
-    btnFs.textContent = document.fullscreenElement ? "⛶" : "⛶";
-    btnFs.title = document.fullscreenElement ? "Exit full screen" : "Full screen";
-    btnFs.classList.toggle("active-fs", !!document.fullscreenElement);
-  });
   $("#btn-highlight").addEventListener("click", () => setTool("highlight"));
   $("#btn-underline").addEventListener("click", () => setTool("underline"));
   $("#btn-draw").addEventListener("click", () => setTool("draw"));
@@ -610,6 +1026,19 @@
   $("#btn-toggle-music").addEventListener("click", toggleMusicVisibility);
   $("#btn-undo").addEventListener("click", undo);
   $("#btn-save").addEventListener("click", saveAnnotated);
+  $("#btn-immersive").addEventListener("click", () => setImmersiveMode(!immersiveMode));
+
+  // Library button
+  $("#btn-library").addEventListener("click", () => {
+    renderLibrary();
+    $("#library-modal").classList.remove("hidden");
+  });
+  $("#library-close").addEventListener("click", () => {
+    $("#library-modal").classList.add("hidden");
+  });
+  $("#library-modal").addEventListener("click", (e) => {
+    if (e.target === $("#library-modal")) $("#library-modal").classList.add("hidden");
+  });
 
   // ── Canvas events (mouse + touch) ─────────────────────────────
   annCanvas.addEventListener("mousedown", onPointerDown);
@@ -624,12 +1053,21 @@
 
   // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
+    if (e.target === textField) return; // don't intercept text input
     if (e.ctrlKey && e.key === "z") { undo(); e.preventDefault(); }
-    if (e.key === "ArrowLeft")  prevPage();
+    if (e.key === "ArrowLeft") prevPage();
     if (e.key === "ArrowRight") nextPage();
+    if (e.key === "Escape" && immersiveMode) setImmersiveMode(false);
+    if (e.key === "f" && !e.ctrlKey && !e.altKey) toggleFullscreen();
   });
 
-  // ── Google Drive Integration (read-only, folder browser) ────────
+  // ── Persist on page unload ────────────────────────────────────
+  window.addEventListener("beforeunload", () => {
+    if (pdfDoc) persistAnnotations();
+    releaseWakeLock();
+  });
+
+  // ── Google Drive Integration ──────────────────────────────────
   const GDRIVE_CLIENT_ID = "339204074130-vucvvbpvlipuqak9f0h4m7b8876solrg.apps.googleusercontent.com";
   const GDRIVE_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
@@ -637,13 +1075,12 @@
   let gdriveToken = null;
   let gdriveFolderStack = [];
 
-  const gdriveModal   = $("#gdrive-modal");
-  const gdriveTitle   = $("#gdrive-title");
-  const gdriveStatus  = $("#gdrive-status");
-  const gdriveBread   = $("#gdrive-breadcrumb");
-  const gdriveList    = $("#gdrive-file-list");
+  const gdriveModal  = $("#gdrive-modal");
+  const gdriveTitle  = $("#gdrive-title");
+  const gdriveStatus = $("#gdrive-status");
+  const gdriveBread  = $("#gdrive-breadcrumb");
+  const gdriveList   = $("#gdrive-file-list");
 
-  // ── OAuth: request token via Google Identity Services ─────────
   function gdriveAuth() {
     if (typeof google === "undefined" || !google.accounts) {
       gdriveStatus.textContent = "⏳ Google API loading, please wait...";
@@ -673,7 +1110,6 @@
     tokenClient.requestAccessToken();
   }
 
-  // ── List files in a folder ────────────────────────────────────
   async function gdriveListFiles(folderId) {
     gdriveList.innerHTML = '<p class="gdrive-loading">Loading...</p>';
     updateBreadcrumb();
@@ -696,7 +1132,6 @@
       }
 
       const data = await res.json();
-
       if (data.error) {
         gdriveList.innerHTML = `<p class="gdrive-error">API Error: ${data.error.message} (${data.error.code})</p>`;
         return;
@@ -708,10 +1143,8 @@
     }
   }
 
-  // ── Render file/folder list ───────────────────────────────────
   function renderFileList(files) {
     gdriveList.innerHTML = "";
-
     if (files.length === 0) {
       gdriveList.innerHTML = '<p class="gdrive-empty">No PDFs or sub-folders here.</p>';
       return;
@@ -743,7 +1176,6 @@
     });
   }
 
-  // ── Breadcrumb navigation ─────────────────────────────────────
   function updateBreadcrumb() {
     gdriveBread.innerHTML = "";
     gdriveFolderStack.forEach((folder, i) => {
@@ -768,7 +1200,6 @@
     });
   }
 
-  // ── Download and open a PDF from Drive ────────────────────────
   async function gdriveOpenPdf(fileId, fileName) {
     gdriveStatus.textContent = `⏳ Loading "${fileName}"...`;
 
@@ -783,7 +1214,7 @@
 
       gdriveModal.classList.add("hidden");
       gdriveStatus.textContent = "";
-      await loadPDF(new Uint8Array(buf));
+      await loadPDF(new Uint8Array(buf), fileName);
     } catch (err) {
       gdriveStatus.textContent = `❌ Failed to load: ${err.message}`;
     }
@@ -821,4 +1252,19 @@
   gdriveModal.addEventListener("click", (e) => {
     if (e.target === gdriveModal) gdriveModal.classList.add("hidden");
   });
+
+  // ── Service Worker Registration (PWA) ─────────────────────────
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+
+  // ── Initialization ────────────────────────────────────────────
+  async function init() {
+    await openDB();
+    document.body.classList.add("toolbar-visible");
+    updateToolbarHeight();
+    window.addEventListener("resize", updateToolbarHeight);
+  }
+
+  init();
 })();

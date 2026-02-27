@@ -2,8 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>PDF Viewer &amp; Annotator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#111111" />
+  <title>ScorePad — Sheet Music Viewer</title>
+  <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
@@ -12,31 +17,44 @@
 <body>
   <!-- Top Bar -->
   <header id="toolbar">
-    <button id="btn-open" title="Open PDF">📂</button>
-    <button id="btn-gdrive" title="Open from Google Drive">☁️</button>
-    <button id="btn-prev" title="Previous page">◀</button>
-    <span id="page-info">0 / 0</span>
-    <button id="btn-next" title="Next page">▶</button>
-    <div class="separator"></div>
-    <button id="btn-zoom-out" title="Zoom out">➖</button>
-    <span id="zoom-level">100%</span>
-    <button id="btn-zoom-in" title="Zoom in">➕</button>
-    <div class="separator"></div>
-    <button id="btn-highlight" class="tool-btn" title="Highlight">🖍️</button>
-    <button id="btn-underline" class="tool-btn" title="Underline">U̲</button>
-    <button id="btn-draw" class="tool-btn" title="Free draw">✏️</button>
-    <button id="btn-text" class="tool-btn" title="Add text note">💬</button>
-    <button id="btn-eraser" class="tool-btn" title="Eraser">🧹</button>
-    <div class="separator"></div>
-    <input type="color" id="color-picker" value="#FFFF00" title="Annotation color" />
-    <button id="btn-undo" title="Undo">↩️</button>
-    <button id="btn-save" title="Save annotated PDF">💾</button>
-    <div class="separator"></div>
-    <button id="btn-music" class="tool-btn" title="Music symbols">🎵</button>
-    <button id="btn-toggle-music" title="Show/hide music annotations">👁️</button>
-    <div class="separator"></div>
-    <button id="btn-fullscreen" title="Full screen">⛶</button>
+    <div id="toolbar-row-main">
+      <button id="btn-library" title="Library">📚</button>
+      <button id="btn-open" title="Open PDF">📂</button>
+      <button id="btn-gdrive" title="Open from Google Drive">☁️</button>
+      <div class="separator"></div>
+      <button id="btn-prev" title="Previous page">◀</button>
+      <span id="page-info">0 / 0</span>
+      <button id="btn-next" title="Next page">▶</button>
+      <div class="separator"></div>
+      <button id="btn-zoom-out" title="Zoom out">➖</button>
+      <span id="zoom-level">100%</span>
+      <button id="btn-zoom-in" title="Zoom in">➕</button>
+      <div class="separator"></div>
+      <button id="btn-highlight" class="tool-btn" title="Highlight">🖍️</button>
+      <button id="btn-underline" class="tool-btn" title="Underline">U̲</button>
+      <button id="btn-draw" class="tool-btn" title="Free draw">✏️</button>
+      <button id="btn-text" class="tool-btn" title="Add text note">💬</button>
+      <button id="btn-eraser" class="tool-btn" title="Eraser">🧹</button>
+      <div class="separator"></div>
+      <input type="color" id="color-picker" value="#FFFF00" title="Annotation color" />
+      <label id="pen-width-group" title="Pen width">
+        <span id="pen-width-icon">╱</span>
+        <input type="range" id="pen-width" min="1" max="20" value="3" />
+      </label>
+      <button id="btn-undo" title="Undo">↩️</button>
+      <button id="btn-save" title="Save annotated PDF">💾</button>
+      <div class="separator"></div>
+      <button id="btn-music" class="tool-btn" title="Music symbols">🎵</button>
+      <button id="btn-toggle-music" title="Show/hide music annotations">👁️</button>
+      <div class="separator"></div>
+      <button id="btn-immersive" title="Immersive mode (hide toolbar)">🎹</button>
+      <button id="btn-fullscreen" title="Full screen">⛶</button>
+    </div>
+    <div id="toolbar-doc-name"></div>
   </header>
+
+  <!-- Status toast -->
+  <div id="status-toast" class="hidden"></div>
 
   <!-- Hidden file input -->
   <input type="file" id="file-input" accept="application/pdf" hidden />
@@ -49,9 +67,18 @@
       <canvas id="annotation-canvas"></canvas>
     </div>
     <div id="drop-zone">
-      <p>📄 Tap <strong>📂</strong> or drop a PDF here</p>
+      <p>🎼 Tap <strong>📂</strong> to open sheet music<br><small>or drop a PDF here</small></p>
     </div>
   </main>
+
+  <!-- Inline text input overlay -->
+  <div id="text-input-overlay" class="hidden">
+    <textarea id="text-input-field" placeholder="Type note..." rows="2"></textarea>
+    <div id="text-input-actions">
+      <button id="text-input-ok">✓</button>
+      <button id="text-input-cancel">✕</button>
+    </div>
+  </div>
 
   <!-- Google Drive folder browser modal -->
   <div id="gdrive-modal" class="modal hidden">
@@ -63,6 +90,17 @@
       <div id="gdrive-status"></div>
       <div id="gdrive-breadcrumb"></div>
       <div id="gdrive-file-list"></div>
+    </div>
+  </div>
+
+  <!-- Library / Recents modal -->
+  <div id="library-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📚 Library</h3>
+        <button id="library-close" title="Close">&times;</button>
+      </div>
+      <div id="library-list"></div>
     </div>
   </div>
 
@@ -81,6 +119,9 @@
     <div id="music-symbol-grid"></div>
     <div id="music-selected">Tap a symbol, then tap the score to place it</div>
   </div>
+
+  <!-- Eraser cursor follower -->
+  <div id="eraser-cursor" class="hidden"></div>
 
   <script src="app.js"></script>
 </body>

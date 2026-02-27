@@ -2,103 +2,174 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 html, body {
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #2b2b2b;
+  background: #111;
   color: #eee;
   overflow: hidden;
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-/* Toolbar */
+/* ── Toolbar ─────────────────────────────────────────────── */
 #toolbar {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: #1e1e1e;
-  border-bottom: 1px solid #444;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  flex-direction: column;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
   flex-shrink: 0;
   z-index: 10;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+#toolbar.toolbar-hidden {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0; left: 0; right: 0;
+}
+
+#toolbar-row-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+#toolbar-row-main::-webkit-scrollbar {
+  display: none;
+}
+
+#toolbar-doc-name {
+  font-size: 0.7rem;
+  color: #666;
+  padding: 0 10px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1;
+}
+
+#toolbar-doc-name:empty {
+  display: none;
 }
 
 #toolbar button {
   background: none;
   border: 1px solid transparent;
-  color: #eee;
-  font-size: 1.2rem;
-  padding: 6px 10px;
+  color: #ccc;
+  font-size: 1.1rem;
+  padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
-  min-width: 38px;
-  transition: background 0.15s;
+  min-width: 36px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
 }
 
 #toolbar button:hover {
-  background: #3a3a3a;
+  background: #2a2a2a;
+  color: #fff;
 }
 
-#toolbar button.active {
-  background: #005a9e;
-  border-color: #3b9cff;
+#toolbar button:active {
+  background: #333;
 }
 
+#toolbar button.active,
 #toolbar button.active-fs {
-  background: #005a9e;
-  border-color: #3b9cff;
+  background: #0a4f8a;
+  border-color: #2d8ed9;
+  color: #fff;
 }
 
 #toolbar button:disabled {
-  opacity: 0.35;
+  opacity: 0.25;
   cursor: default;
 }
 
 .separator {
   width: 1px;
-  height: 24px;
-  background: #555;
+  height: 22px;
+  background: #333;
   flex-shrink: 0;
 }
 
 #page-info, #zoom-level {
-  font-size: 0.85rem;
-  min-width: 50px;
+  font-size: 0.8rem;
+  min-width: 48px;
   text-align: center;
   white-space: nowrap;
+  color: #999;
+  font-variant-numeric: tabular-nums;
 }
 
 #color-picker {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  border: 2px solid #444;
+  border-radius: 50%;
   cursor: pointer;
   background: none;
   padding: 0;
+  flex-shrink: 0;
 }
 
-/* Viewer */
+#pen-width-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+#pen-width-icon {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+#pen-width {
+  width: 60px;
+  height: 4px;
+  accent-color: #2d8ed9;
+}
+
+/* ── Viewer ──────────────────────────────────────────────── */
 #viewer {
   flex: 1;
   display: flex;
   justify-content: center;
   align-items: flex-start;
   overflow: auto;
-  height: calc(100vh - 50px);
   position: relative;
+  background: #111;
+}
+
+body:not(.toolbar-visible) #viewer {
+  height: 100vh;
+}
+
+body.toolbar-visible #viewer {
+  height: calc(100vh - var(--toolbar-h, 50px));
 }
 
 #canvas-wrapper {
   position: relative;
   display: none;
-  margin: 16px auto;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  margin: 8px auto;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.6);
+  border-radius: 2px;
+  overflow: hidden;
 }
 
 #pdf-canvas {
@@ -110,6 +181,15 @@ html, body {
   top: 0;
   left: 0;
   cursor: crosshair;
+  z-index: 3;
+}
+
+#music-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 2;
 }
 
 #drop-zone {
@@ -124,19 +204,25 @@ html, body {
 }
 
 #drop-zone p {
-  font-size: 1.3rem;
-  color: #888;
+  font-size: 1.2rem;
+  color: #555;
   text-align: center;
-  padding: 40px;
-  border: 2px dashed #555;
-  border-radius: 16px;
+  padding: 48px 56px;
+  border: 2px dashed #333;
+  border-radius: 20px;
+  line-height: 1.8;
+}
+
+#drop-zone p small {
+  font-size: 0.85rem;
+  color: #444;
 }
 
 #drop-zone.hidden {
   display: none;
 }
 
-/* Navigation overlay feedback */
+/* ── Navigation overlay feedback ─────────────────────────── */
 #nav-overlay {
   position: absolute;
   top: 0;
@@ -146,8 +232,8 @@ html, body {
   pointer-events: none;
   display: flex;
   align-items: center;
-  font-size: 4rem;
-  color: rgba(255,255,255,0.7);
+  font-size: 3rem;
+  color: rgba(255,255,255,0.5);
   opacity: 0;
   z-index: 5;
 }
@@ -156,7 +242,7 @@ html, body {
 #nav-overlay.nav-prev { justify-content: flex-start; padding-left: 5%; }
 
 #nav-overlay.nav-flash {
-  animation: navFlash 0.35s ease-out forwards;
+  animation: navFlash 0.3s ease-out forwards;
 }
 
 @keyframes navFlash {
@@ -164,48 +250,205 @@ html, body {
   100% { opacity: 0; }
 }
 
-/* Mobile adjustments */
+/* ── Status Toast ────────────────────────────────────────── */
+#status-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.85);
+  color: #ddd;
+  padding: 8px 20px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  z-index: 200;
+  pointer-events: none;
+  transition: opacity 0.3s;
+  backdrop-filter: blur(8px);
+  border: 1px solid #333;
+}
+
+#status-toast.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Eraser cursor ───────────────────────────────────────── */
+#eraser-cursor {
+  position: fixed;
+  border: 2px solid rgba(255,255,255,0.6);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 100;
+  transition: width 0.1s, height 0.1s;
+}
+
+#eraser-cursor.hidden {
+  display: none;
+}
+
+/* ── Inline text input ───────────────────────────────────── */
+#text-input-overlay {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#text-input-overlay.hidden {
+  display: none;
+}
+
+#text-input-field {
+  background: rgba(30,30,30,0.95);
+  border: 1px solid #2d8ed9;
+  border-radius: 6px;
+  color: #eee;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: none;
+  min-width: 180px;
+  outline: none;
+  backdrop-filter: blur(8px);
+}
+
+#text-input-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+#text-input-actions button {
+  background: #2d8ed9;
+  border: none;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+#text-input-actions button:last-child {
+  background: #444;
+}
+
+/* ── Library Modal ───────────────────────────────────────── */
+#library-list {
+  padding: 8px;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.library-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.library-item:hover {
+  background: #1a2a3a;
+}
+
+.library-item-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.library-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-item-name {
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #ddd;
+}
+
+.library-item-meta {
+  font-size: 0.75rem;
+  color: #666;
+  margin-top: 2px;
+}
+
+.library-item-delete {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.library-item-delete:hover {
+  color: #e55;
+  background: rgba(255,0,0,0.1);
+}
+
+.library-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+/* ── Mobile adjustments ──────────────────────────────────── */
 @media (max-width: 600px) {
-  #toolbar {
-    gap: 3px;
+  #toolbar-row-main {
+    gap: 2px;
     padding: 4px 6px;
   }
   #toolbar button {
     font-size: 1rem;
-    padding: 5px 7px;
+    padding: 5px 6px;
     min-width: 32px;
   }
   #page-info, #zoom-level {
-    font-size: 0.75rem;
-    min-width: 40px;
+    font-size: 0.7rem;
+    min-width: 36px;
+  }
+  #pen-width {
+    width: 45px;
   }
 }
 
-/* ── Google Drive Modal ────────────────────────────────────────── */
+/* ── Google Drive Modal ──────────────────────────────────── */
 .modal {
   position: fixed;
   top: 0; left: 0;
   width: 100%; height: 100%;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0,0,0,0.7);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 100;
+  backdrop-filter: blur(4px);
 }
 
 .modal.hidden { display: none; }
 
 .modal-content {
-  background: #1e1e1e;
-  border: 1px solid #444;
-  border-radius: 12px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 14px;
   width: 90%;
   max-width: 520px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.6);
 }
 
 .modal-header {
@@ -213,11 +456,11 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid #444;
+  border-bottom: 1px solid #333;
 }
 
 .modal-header h3 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
   margin: 0;
 }
@@ -225,7 +468,7 @@ html, body {
 .modal-header button {
   background: none;
   border: none;
-  color: #aaa;
+  color: #888;
   font-size: 1.5rem;
   cursor: pointer;
   line-height: 1;
@@ -301,27 +544,14 @@ html, body {
 
 .gdrive-error { color: #e66; }
 
-/* ── Music symbol canvas ───────────────────────────────────── */
-#music-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  pointer-events: none;
-  z-index: 2;
-}
-
-#annotation-canvas {
-  z-index: 3;
-}
-
 /* ── Music Symbol Picker Panel ─────────────────────────────── */
 #music-panel {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  background: #1e1e1e;
-  border-top: 2px solid #444;
+  background: #1a1a1a;
+  border-top: 2px solid #333;
   z-index: 50;
   max-height: 55vh;
   overflow-y: auto;
@@ -338,7 +568,7 @@ html, body {
   justify-content: space-between;
   align-items: center;
   padding: 10px 16px;
-  border-bottom: 1px solid #444;
+  border-bottom: 1px solid #333;
   font-weight: 600;
   font-size: 1rem;
 }
@@ -363,7 +593,7 @@ html, body {
   align-items: center;
   gap: 16px;
   padding: 10px 16px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid #2a2a2a;
   flex-wrap: wrap;
 }
 
@@ -404,7 +634,7 @@ html, body {
 .music-sym-group {
   width: 100%;
   font-size: 0.7rem;
-  color: #777;
+  color: #555;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 6px 4px 2px;
@@ -416,7 +646,7 @@ html, body {
   justify-content: center;
   width: 44px;
   height: 44px;
-  background: #2a2a2a;
+  background: #222;
   border: 2px solid transparent;
   border-radius: 8px;
   color: #eee;
@@ -427,12 +657,12 @@ html, body {
 }
 
 .music-sym-btn:hover {
-  background: #3a3a3a;
+  background: #333;
 }
 
 .music-sym-btn.selected {
-  background: #005a9e;
-  border-color: #3b9cff;
+  background: #0a4f8a;
+  border-color: #2d8ed9;
 }
 
 .music-sym-btn .sym-label {
@@ -443,9 +673,9 @@ html, body {
 #music-selected {
   padding: 8px 16px;
   font-size: 0.8rem;
-  color: #888;
+  color: #666;
   text-align: center;
-  border-top: 1px solid #333;
+  border-top: 1px solid #2a2a2a;
 }
 
 #btn-toggle-music.music-hidden {

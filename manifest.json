@@ -1,0 +1,19 @@
+{
+  "name": "ScorePad — Sheet Music Viewer",
+  "short_name": "ScorePad",
+  "description": "Professional sheet music PDF viewer & annotator",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "categories": ["music", "productivity"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%23111'/><text x='256' y='340' text-anchor='middle' font-size='280'>🎼</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
