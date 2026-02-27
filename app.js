@@ -369,7 +369,7 @@
   // Your OAuth Client ID from Google Cloud Console
   const GDRIVE_CLIENT_ID = "339204074130-fhe2b0djcargt6g016vh575bflgf17aq.apps.googleusercontent.com";
   // API key for the Picker API (create at Google Cloud Console → Credentials → API Key)
-  const GDRIVE_API_KEY = "YOUR_API_KEY_HERE";
+  const GDRIVE_API_KEY = "AIzaSyAMwO5j93JgB3eZcFHVQ6br06eMoYSzr8I";
   // Restricted scope: only files explicitly opened/selected by the user
   const GDRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
   const DRIVE_API = "https://www.googleapis.com/drive/v3";
