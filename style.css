@@ -49,6 +49,11 @@ html, body {
   border-color: #3b9cff;
 }
 
+#toolbar button.active-fs {
+  background: #005a9e;
+  border-color: #3b9cff;
+}
+
 #toolbar button:disabled {
   opacity: 0.35;
   cursor: default;

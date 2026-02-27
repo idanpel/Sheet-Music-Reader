@@ -149,7 +149,7 @@
 
   function zoomIn() {
     storePageAnnotations();
-    scale = Math.min(scale + 0.25, 5);
+    scale = Math.min(+(scale + 0.1).toFixed(2), 5);
     clearPageCache();
     zoomLabel.textContent = `${Math.round((scale / 1.5) * 100)}%`;
     renderPage(pageNum);
@@ -157,7 +157,7 @@
 
   function zoomOut() {
     storePageAnnotations();
-    scale = Math.max(scale - 0.25, 0.5);
+    scale = Math.max(+(scale - 0.1).toFixed(2), 0.3);
     clearPageCache();
     zoomLabel.textContent = `${Math.round((scale / 1.5) * 100)}%`;
     renderPage(pageNum);
@@ -386,6 +386,22 @@
   $("#btn-next").addEventListener("click", nextPage);
   $("#btn-zoom-in").addEventListener("click", zoomIn);
   $("#btn-zoom-out").addEventListener("click", zoomOut);
+
+  // ── Fullscreen ─────────────────────────────────────────────
+  const btnFs = $("#btn-fullscreen");
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen();
+    }
+  }
+  btnFs.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", () => {
+    btnFs.textContent = document.fullscreenElement ? "⛶" : "⛶";
+    btnFs.title = document.fullscreenElement ? "Exit full screen" : "Full screen";
+    btnFs.classList.toggle("active-fs", !!document.fullscreenElement);
+  });
   $("#btn-highlight").addEventListener("click", () => setTool("highlight"));
   $("#btn-underline").addEventListener("click", () => setTool("underline"));
   $("#btn-draw").addEventListener("click", () => setTool("draw"));
