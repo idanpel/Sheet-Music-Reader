@@ -31,9 +31,13 @@
   let navStartX = 0;
   let navStartY = 0;
   let navStartTime = 0;
-  const SWIPE_THRESHOLD = 50;   // min px horizontal movement
-  const SWIPE_TIME_LIMIT = 500; // max ms for a swipe
-  const TAP_ZONE_RATIO = 0.3;   // left/right 30% of page
+  let isNavigating = false; // debounce flag to prevent double-flips
+  const SWIPE_THRESHOLD = 80;   // min px horizontal movement (raised for tablet)
+  const SWIPE_TIME_LIMIT = 400; // max ms for a swipe
+  const TAP_ZONE_RATIO = 0.25;  // left/right 25% of page
+
+  // Page render cache for fast navigation
+  const pageCache = {};
 
   // Per-page annotation layers stored as ImageData
   const annotations = {};
@@ -62,19 +66,47 @@
   }
 
   // ── Render page ───────────────────────────────────────────────
-  async function renderPage(num) {
-    if (!pdfDoc) return;
+  async function renderPageToCache(num) {
+    if (!pdfDoc || pageCache[num + '_' + scale]) return;
     const page = await pdfDoc.getPage(num);
     const viewport = page.getViewport({ scale });
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = viewport.width;
+    offCanvas.height = viewport.height;
+    const offCtx = offCanvas.getContext('2d');
+    await page.render({ canvasContext: offCtx, viewport }).promise;
+    pageCache[num + '_' + scale] = offCanvas;
+  }
 
-    pdfCanvas.width  = viewport.width;
-    pdfCanvas.height = viewport.height;
-    annCanvas.width  = viewport.width;
-    annCanvas.height = viewport.height;
+  async function renderPage(num) {
+    if (!pdfDoc) return;
+    const cacheKey = num + '_' + scale;
 
-    await page.render({ canvasContext: pdfCtx, viewport }).promise;
+    // Render to cache if not already there
+    if (!pageCache[cacheKey]) {
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale });
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = viewport.width;
+      offCanvas.height = viewport.height;
+      const offCtx = offCanvas.getContext('2d');
+      await page.render({ canvasContext: offCtx, viewport }).promise;
+      pageCache[cacheKey] = offCanvas;
+    }
+
+    const cached = pageCache[cacheKey];
+    pdfCanvas.width  = cached.width;
+    pdfCanvas.height = cached.height;
+    annCanvas.width  = cached.width;
+    annCanvas.height = cached.height;
+
+    pdfCtx.drawImage(cached, 0, 0);
     restorePageAnnotations();
     pageInfo.textContent = `${num} / ${totalPages}`;
+
+    // Pre-cache adjacent pages in background
+    if (num > 1) renderPageToCache(num - 1);
+    if (num < totalPages) renderPageToCache(num + 1);
   }
 
   // ── Load PDF ──────────────────────────────────────────────────
@@ -93,25 +125,32 @@
 
   // ── Navigation ────────────────────────────────────────────────
   function prevPage() {
-    if (pageNum <= 1) return;
+    if (pageNum <= 1 || isNavigating) return;
+    isNavigating = true;
     storePageAnnotations();
     pageNum--;
-    renderPage(pageNum);
+    renderPage(pageNum).then(() => { isNavigating = false; });
     updateButtons();
   }
 
   function nextPage() {
-    if (pageNum >= totalPages) return;
+    if (pageNum >= totalPages || isNavigating) return;
+    isNavigating = true;
     storePageAnnotations();
     pageNum++;
-    renderPage(pageNum);
+    renderPage(pageNum).then(() => { isNavigating = false; });
     updateButtons();
   }
 
   // ── Zoom ──────────────────────────────────────────────────────
+  function clearPageCache() {
+    Object.keys(pageCache).forEach(k => delete pageCache[k]);
+  }
+
   function zoomIn() {
     storePageAnnotations();
     scale = Math.min(scale + 0.25, 5);
+    clearPageCache();
     zoomLabel.textContent = `${Math.round((scale / 1.5) * 100)}%`;
     renderPage(pageNum);
   }
@@ -119,6 +158,7 @@
   function zoomOut() {
     storePageAnnotations();
     scale = Math.max(scale - 0.25, 0.5);
+    clearPageCache();
     zoomLabel.textContent = `${Math.round((scale / 1.5) * 100)}%`;
     renderPage(pageNum);
   }
@@ -179,7 +219,11 @@
     navStartY = touch.clientY;
     navStartTime = Date.now();
 
-    if (tool === "none") return; // let onPointerUp handle navigation
+    if (tool === "none") {
+      // Prevent default to stop browser scroll/zoom during navigation
+      if (e.cancelable) e.preventDefault();
+      return;
+    }
     e.preventDefault();
     drawing = true;
     const pos = getPos(e);
@@ -225,6 +269,8 @@
   }
 
   function onPointerMove(e) {
+    // Prevent browser scroll/zoom on touch during navigation mode
+    if (tool === "none" && e.cancelable) e.preventDefault();
     if (!drawing) return;
     e.preventDefault();
     const pos = getPos(e);
@@ -253,6 +299,7 @@
   function onPointerUp(e) {
     // Handle navigation when no annotation tool is active
     if (tool === "none" && pdfDoc) {
+      if (e.cancelable) e.preventDefault();
       const touch = e.changedTouches ? e.changedTouches[0] : e;
       const dx = touch.clientX - navStartX;
       const dy = touch.clientY - navStartY;
@@ -261,15 +308,15 @@
       const rect = annCanvas.getBoundingClientRect();
       const relX = (touch.clientX - rect.left) / rect.width;
 
-      // Swipe detection
-      if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) && dt < SWIPE_TIME_LIMIT) {
+      // Swipe detection (horizontal swipe, must exceed threshold)
+      if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < SWIPE_TIME_LIMIT) {
         if (dx < 0) { nextPage(); showNavFeedback("next"); }
         else        { prevPage(); showNavFeedback("prev"); }
         return;
       }
 
       // Tap zone detection (short tap, minimal movement)
-      if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && dt < 300) {
+      if (Math.abs(dx) < 15 && Math.abs(dy) < 15 && dt < 300) {
         if (relX >= 1 - TAP_ZONE_RATIO) {
           nextPage(); showNavFeedback("next");
         } else if (relX <= TAP_ZONE_RATIO) {
@@ -355,7 +402,7 @@
 
   annCanvas.addEventListener("touchstart", onPointerDown, { passive: false });
   annCanvas.addEventListener("touchmove", onPointerMove, { passive: false });
-  annCanvas.addEventListener("touchend", onPointerUp);
+  annCanvas.addEventListener("touchend", onPointerUp, { passive: false });
   annCanvas.addEventListener("touchcancel", onPointerUp);
 
   // Keyboard shortcuts
