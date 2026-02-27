@@ -92,7 +92,8 @@
     return new Promise((resolve, reject) => {
       const tx = db.transaction(store, "readwrite");
       const s = tx.objectStore(store);
-      const req = key !== undefined ? s.put(value, key) : s.put(value);
+      // If store has a keyPath (like "library"), don't pass an explicit key
+      const req = (key !== null && key !== undefined) ? s.put(value, key) : s.put(value);
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
@@ -254,7 +255,7 @@
   async function addToLibrary(name, bytes) {
     if (!db) return;
     try {
-      await dbPut("library", undefined, {
+      await dbPut("library", null, {
         name,
         size: bytes.length,
         lastOpened: Date.now(),
@@ -487,13 +488,44 @@
       toolbar.classList.add("toolbar-hidden");
       document.body.classList.remove("toolbar-visible");
       $("#btn-immersive").classList.add("active");
-      showToast("Immersive mode — double-tap center to show toolbar");
+      // Show a small floating button to exit immersive mode
+      showImmersiveExitHint();
+      showToast("Immersive mode — tap ☰ or center of page to show toolbar");
     } else {
       toolbar.classList.remove("toolbar-hidden");
       document.body.classList.add("toolbar-visible");
       $("#btn-immersive").classList.remove("active");
+      hideImmersiveExitHint();
       updateToolbarHeight();
     }
+  }
+
+  // Floating exit button for immersive mode
+  const immersiveExitBtn = document.createElement("button");
+  immersiveExitBtn.id = "immersive-exit-btn";
+  immersiveExitBtn.textContent = "☰";
+  immersiveExitBtn.title = "Show toolbar";
+  immersiveExitBtn.style.cssText = `
+    position: fixed; top: 8px; right: 8px; z-index: 200;
+    background: rgba(0,0,0,0.5); color: #ccc; border: 1px solid #555;
+    border-radius: 8px; font-size: 1.2rem; padding: 6px 10px;
+    cursor: pointer; display: none; backdrop-filter: blur(4px);
+    transition: opacity 0.3s;
+  `;
+  immersiveExitBtn.addEventListener("click", () => setImmersiveMode(false));
+  document.body.appendChild(immersiveExitBtn);
+
+  function showImmersiveExitHint() {
+    immersiveExitBtn.style.display = "block";
+    // Fade it to subtle after 3 seconds
+    setTimeout(() => { immersiveExitBtn.style.opacity = "0.3"; }, 3000);
+    immersiveExitBtn.addEventListener("mouseenter", () => { immersiveExitBtn.style.opacity = "1"; });
+    immersiveExitBtn.addEventListener("mouseleave", () => { immersiveExitBtn.style.opacity = "0.3"; });
+  }
+
+  function hideImmersiveExitHint() {
+    immersiveExitBtn.style.display = "none";
+    immersiveExitBtn.style.opacity = "1";
   }
 
   function updateToolbarHeight() {
@@ -767,12 +799,44 @@
   }
 
   function onPointerUp(e) {
-    // Handle double-tap for toolbar toggle in immersive mode
+    // Handle toolbar toggle in immersive mode — single tap center of page
     if (tool === "none" && immersiveMode && pdfDoc) {
-      if (handleDoubleTapCenter(e)) return;
+      const touch = e.changedTouches ? e.changedTouches[0] : e;
+      const dx = touch.clientX - navStartX;
+      const dy = touch.clientY - navStartY;
+      const dt = Date.now() - navStartTime;
+      const rect = annCanvas.getBoundingClientRect();
+      const relX = (touch.clientX - rect.left) / rect.width;
+
+      // Short tap in center 50% → toggle toolbar
+      if (Math.abs(dx) < 15 && Math.abs(dy) < 15 && dt < 300 && relX > 0.25 && relX < 0.75) {
+        if (toolbar.classList.contains("toolbar-hidden")) {
+          toolbar.classList.remove("toolbar-hidden");
+          document.body.classList.add("toolbar-visible");
+          updateToolbarHeight();
+          resetToolbarAutoHide();
+        } else {
+          toolbar.classList.add("toolbar-hidden");
+          document.body.classList.remove("toolbar-visible");
+        }
+        return;
+      }
+
+      // Left/right tap zones and swipes still navigate pages
+      if (e.cancelable) e.preventDefault();
+      if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < SWIPE_TIME_LIMIT) {
+        if (dx < 0) { nextPage(); showNavFeedback("next"); }
+        else        { prevPage(); showNavFeedback("prev"); }
+        return;
+      }
+      if (Math.abs(dx) < 15 && Math.abs(dy) < 15 && dt < 300) {
+        if (relX >= 1 - TAP_ZONE_RATIO) { nextPage(); showNavFeedback("next"); }
+        else if (relX <= TAP_ZONE_RATIO) { prevPage(); showNavFeedback("prev"); }
+      }
+      return;
     }
 
-    // Handle navigation when no annotation tool is active
+    // Handle navigation when no annotation tool is active (non-immersive)
     if (tool === "none" && pdfDoc) {
       if (e.cancelable) e.preventDefault();
       const touch = e.changedTouches ? e.changedTouches[0] : e;
