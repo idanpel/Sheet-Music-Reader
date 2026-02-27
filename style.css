@@ -295,3 +295,17 @@ html, body {
 }
 
 .gdrive-error { color: #e66; }
+
+.gdrive-change-folder {
+  background: #2a3a4a;
+  border: 1px solid #4a6a8a;
+  color: #8bc4ff;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: 8px;
+  transition: background 0.15s;
+}
+
+.gdrive-change-folder:hover { background: #3a5a7a; }
