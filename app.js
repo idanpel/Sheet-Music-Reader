@@ -432,6 +432,12 @@
       }
 
       const data = await res.json();
+
+      if (data.error) {
+        gdriveList.innerHTML = `<p class="gdrive-error">API Error: ${data.error.message} (${data.error.code})</p>`;
+        return;
+      }
+
       renderFileList(data.files || []);
     } catch (err) {
       gdriveList.innerHTML = `<p class="gdrive-error">Error: ${err.message}</p>`;
